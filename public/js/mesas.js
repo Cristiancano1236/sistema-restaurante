@@ -125,6 +125,36 @@ $(function() {
     });
   }
 
+  // Eliminar item del pedido
+  // Relacionado con: routes/mesas.js (DELETE /api/mesas/items/:itemId)
+  $(document).on('click', '.btn-outline-danger[data-idx]', async function(e){
+    e.preventDefault();
+    const idx = Number($(this).data('idx'));
+    const item = items[idx];
+    if(!item || !item.id) return;
+    
+    const confirmacion = await Swal.fire({
+      title: '¿Eliminar producto?',
+      text: `¿Está seguro de eliminar ${item.producto_nombre || item.nombre || 'este producto'}?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+    
+    if(!confirmacion.isConfirmed) return;
+    
+    try{
+      const resp = await fetch(`/api/mesas/items/${item.id}`, { method:'DELETE' });
+      const data = await resp.json();
+      if(!resp.ok) throw new Error(data.error || 'Error al eliminar');
+      await cargarPedido(pedidoActual.id);
+      Swal.fire({icon:'success', title:'Producto eliminado'});
+    }catch(err){
+      Swal.fire({icon:'error', title: err.message || 'No se pudo eliminar el producto'});
+    }
+  });
+
   // Enviar todos los items pendientes a cocina
   $('#btnEnviarCocina').on('click', async function(){
     try{

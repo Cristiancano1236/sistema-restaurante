@@ -147,6 +147,29 @@ router.post('/pedidos/:pedidoId/items', async (req, res) => {
     }
 });
 
+// DELETE /mesas/items/:itemId - API: eliminar item del pedido
+// Relacionado con: public/js/mesas.js (función eliminarItem)
+// IMPORTANTE: Esta ruta debe ir ANTES de las rutas PUT más específicas para evitar conflictos
+router.delete('/items/:itemId', async (req, res) => {
+    try {
+        const itemId = req.params.itemId;
+        console.log(`DELETE /api/mesas/items/${itemId} - Eliminando item`);
+        const [result] = await db.query(
+            `DELETE FROM pedido_items WHERE id = ?`,
+            [itemId]
+        );
+        if (result.affectedRows === 0) {
+            console.log(`Item ${itemId} no encontrado`);
+            return res.status(404).json({ error: 'Item no encontrado' });
+        }
+        console.log(`Item ${itemId} eliminado exitosamente`);
+        res.json({ message: 'Item eliminado' });
+    } catch (error) {
+        console.error('Error al eliminar item:', error);
+        res.status(500).json({ error: 'Error al eliminar item' });
+    }
+});
+
 // PUT /mesas/items/:itemId/enviar - API: enviar item a cocina
 router.put('/items/:itemId/enviar', async (req, res) => {
     try {

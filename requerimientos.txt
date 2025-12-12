@@ -1,0 +1,1 @@
+* En sql agregar el consumidor final a los usuarios para evitar error
