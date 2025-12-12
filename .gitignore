@@ -3,6 +3,8 @@ node_modules/
 dist/
 public/uploads/
 
+.cu
+dist.zip
 # Archivos de entorno
 .env
 .env.*
