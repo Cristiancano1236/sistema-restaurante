@@ -38,6 +38,16 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/static', express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Vendor assets (para funcionar OFFLINE incluso empaquetado con pkg)
+// Nota: estos paths deben existir en node_modules y estar incluidos en package.json -> pkg.assets
+app.use('/vendor/bootstrap', express.static(path.join(__dirname, 'node_modules', 'bootstrap', 'dist')));
+app.use('/vendor/jquery', express.static(path.join(__dirname, 'node_modules', 'jquery', 'dist')));
+app.use('/vendor/sweetalert2', express.static(path.join(__dirname, 'node_modules', 'sweetalert2', 'dist')));
+app.use('/vendor/select2', express.static(path.join(__dirname, 'node_modules', 'select2', 'dist')));
+app.use('/vendor/select2-bootstrap-5-theme', express.static(path.join(__dirname, 'node_modules', 'select2-bootstrap-5-theme', 'dist')));
+// bootstrap-icons usa fuentes (woff/woff2) -> servir carpeta font completa
+app.use('/vendor/bootstrap-icons', express.static(path.join(__dirname, 'node_modules', 'bootstrap-icons', 'font')));
+
 // Headers de seguridad y CORS
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
