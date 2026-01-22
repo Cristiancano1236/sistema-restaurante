@@ -163,6 +163,233 @@ $(document).ready(function() {
     let productosFactura = [];
     let totalFactura = 0;
 
+    // ===== Pago mixto (varios medios) =====
+    // Relacionado con:
+    // - views/index.ejs (select #formaPago incluye 'mixto')
+    // - routes/facturas.js (POST /api/facturas recibe pagos[])
+    // Nota: guardamos pagos en memoria para enviarlos al backend al generar factura.
+    let pagosFactura = null; // null = no definido / no mixto; Array = lista de pagos
+
+    function parseMoneyInput(value) {
+        const v = String(value ?? '').trim();
+        if (!v) return 0;
+        let normalized = v.replace(/\s/g, '');
+        const hasComma = normalized.includes(',');
+        const hasDot = normalized.includes('.');
+        if (hasComma && hasDot) {
+            normalized = normalized.replace(/,/g, '');
+        } else if (hasComma && !hasDot) {
+            normalized = normalized.replace(/,/g, '.');
+        }
+        normalized = normalized.replace(/[^\d.-]/g, '');
+        const n = Number(normalized);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function formatMoney(n) {
+        return `$${Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
+    function almostEqualMoney(a, b) {
+        return Math.abs(Number(a) - Number(b)) < 0.01;
+    }
+
+    async function pedirPagosMixtos(total) {
+        const result = await Swal.fire({
+            title: 'Pago mixto',
+            html: `
+                <div class="text-start">
+                    <div class="small text-muted mb-2">Total a pagar: <strong id="pmTotal">${formatMoney(total)}</strong></div>
+                    <div id="pmRows" class="vstack gap-2"></div>
+                    <div class="d-flex gap-2 mt-2">
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="pmAddRow">
+                            <i class="bi bi-plus-lg"></i> Agregar medio
+                        </button>
+                        <div class="ms-auto small text-muted align-self-center">
+                            Sumatoria: <strong id="pmSum">${formatMoney(0)}</strong>
+                        </div>
+                    </div>
+                    <div class="mt-2" id="pmDiffWrap">
+                        <span class="badge text-bg-secondary" id="pmDiff">Falta: ${formatMoney(total)}</span>
+                    </div>
+                    <div class="alert alert-warning py-2 px-3 mt-2 mb-0 small" id="pmWarn" style="display:none"></div>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: 'Usar estos pagos',
+            cancelButtonText: 'Cancelar',
+            focusConfirm: false,
+            didOpen: () => {
+                const rows = document.getElementById('pmRows');
+                const btnAdd = document.getElementById('pmAddRow');
+                const sumEl = document.getElementById('pmSum');
+                const diffEl = document.getElementById('pmDiff');
+                const warnEl = document.getElementById('pmWarn');
+
+                const allowClipboard = (el) => {
+                    if (!el) return;
+                    ['paste','copy','cut','contextmenu'].forEach(evt => {
+                        el.addEventListener(evt, (e) => e.stopPropagation());
+                    });
+                };
+
+                const rowTemplate = (metodo = 'efectivo', monto = '', referencia = '') => `
+                    <div class="border rounded p-2 pm-row">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-5">
+                                <label class="form-label small mb-1">Método</label>
+                                <select class="form-select form-select-sm pm-metodo">
+                                    <option value="efectivo">Efectivo</option>
+                                    <option value="transferencia">Transferencia</option>
+                                    <option value="tarjeta">Tarjeta</option>
+                                </select>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small mb-1">Monto</label>
+                                <input type="text" class="form-control form-control-sm pm-monto" placeholder="0.00" value="${String(monto)}">
+                            </div>
+                            <div class="col-3 text-end">
+                                <button type="button" class="btn btn-outline-danger btn-sm pm-del" title="Eliminar">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small mb-1">Referencia (opcional)</label>
+                                <input type="text" class="form-control form-control-sm pm-ref" placeholder="Ej: #transacción / últimos 4 dígitos" value="${String(referencia)}">
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                const recalc = (sourceInput = null) => {
+                    const montoInputs = Array.from(rows.querySelectorAll('.pm-monto'));
+                    const montos = montoInputs.map(i => parseMoneyInput(i.value));
+                    const sum = montos.reduce((a, b) => a + b, 0);
+
+                    const diff = Number(total) - Number(sum);
+                    if (diffEl) {
+                        if (almostEqualMoney(diff, 0)) {
+                            diffEl.className = 'badge text-bg-success';
+                            diffEl.textContent = 'Listo: total completo';
+                        } else if (diff > 0) {
+                            diffEl.className = 'badge text-bg-warning';
+                            diffEl.textContent = `Falta: ${formatMoney(diff)}`;
+                        } else {
+                            diffEl.className = 'badge text-bg-danger';
+                            diffEl.textContent = `Sobra: ${formatMoney(Math.abs(diff))}`;
+                        }
+                    }
+
+                    sumEl.textContent = formatMoney(sum);
+                    warnEl.style.display = 'none';
+
+                    const remaining = Number(total) - Number(sum);
+                    if (remaining > 0.009) {
+                        const candidate = montoInputs
+                            .filter(inp => inp !== sourceInput)
+                            .reverse()
+                            .find(inp => inp && inp.dataset && inp.dataset.touched !== 'true');
+                        if (candidate) {
+                            candidate.value = Number(remaining.toFixed(2)).toString();
+                            const montos2 = montoInputs.map(i => parseMoneyInput(i.value));
+                            const sum2 = montos2.reduce((a, b) => a + b, 0);
+                            sumEl.textContent = formatMoney(sum2);
+                            const diff2 = Number(total) - Number(sum2);
+                            if (diffEl) {
+                                if (almostEqualMoney(diff2, 0)) {
+                                    diffEl.className = 'badge text-bg-success';
+                                    diffEl.textContent = 'Listo: total completo';
+                                } else if (diff2 > 0) {
+                                    diffEl.className = 'badge text-bg-warning';
+                                    diffEl.textContent = `Falta: ${formatMoney(diff2)}`;
+                                } else {
+                                    diffEl.className = 'badge text-bg-danger';
+                                    diffEl.textContent = `Sobra: ${formatMoney(Math.abs(diff2))}`;
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const addRow = (metodo = 'efectivo', monto = '', referencia = '') => {
+                    const wrap = document.createElement('div');
+                    wrap.innerHTML = rowTemplate(metodo, monto, referencia);
+                    const row = wrap.firstElementChild;
+                    rows.appendChild(row);
+
+                    const sel = row.querySelector('.pm-metodo');
+                    const montoEl = row.querySelector('.pm-monto');
+                    const refEl = row.querySelector('.pm-ref');
+                    const del = row.querySelector('.pm-del');
+
+                    if (sel) sel.value = metodo;
+                    allowClipboard(montoEl);
+                    allowClipboard(refEl);
+
+                    if (montoEl) {
+                        montoEl.dataset.touched = 'false';
+                        montoEl.addEventListener('input', () => {
+                            montoEl.dataset.touched = 'true';
+                            recalc(montoEl);
+                        });
+                        montoEl.addEventListener('focus', () => {
+                            try { montoEl.select(); } catch (_) {}
+                        });
+                    }
+                    if (sel) sel.addEventListener('change', () => recalc(montoEl));
+                    if (del) del.addEventListener('click', () => { row.remove(); recalc(); });
+
+                    if (montoEl) setTimeout(() => montoEl.focus(), 0);
+                    recalc();
+                };
+
+                btnAdd.addEventListener('click', () => addRow('efectivo', '', ''));
+
+                // Fila inicial: por defecto todo en efectivo
+                addRow('efectivo', String(Number(total).toFixed(2)), '');
+
+                window.__pm_getRows = () => rows;
+                window.__pm_setWarn = (msg) => {
+                    warnEl.textContent = msg;
+                    warnEl.style.display = 'block';
+                };
+            },
+            preConfirm: () => {
+                const rows = window.__pm_getRows ? window.__pm_getRows() : null;
+                if (!rows) return false;
+                const pagos = Array.from(rows.querySelectorAll('.pm-row')).map(r => {
+                    const metodo = (r.querySelector('.pm-metodo')?.value || '').trim();
+                    const monto = parseMoneyInput(r.querySelector('.pm-monto')?.value || 0);
+                    const referencia = (r.querySelector('.pm-ref')?.value || '').trim();
+                    return { metodo, monto, referencia };
+                }).filter(p => p.metodo && p.monto > 0);
+
+                if (pagos.length === 0) {
+                    window.__pm_setWarn && window.__pm_setWarn('Agrega al menos un medio de pago con monto.');
+                    return false;
+                }
+
+                const sum = pagos.reduce((a, p) => a + Number(p.monto || 0), 0);
+                if (!almostEqualMoney(sum, total)) {
+                    window.__pm_setWarn && window.__pm_setWarn(`La sumatoria (${formatMoney(sum)}) debe ser igual al total (${formatMoney(total)}).`);
+                    return false;
+                }
+
+                return pagos.map(p => ({
+                    metodo: p.metodo,
+                    monto: Number(p.monto.toFixed(2)),
+                    referencia: p.referencia || ''
+                }));
+            },
+            willClose: () => {
+                try { delete window.__pm_getRows; delete window.__pm_setWarn; } catch (_) {}
+            }
+        });
+
+        if (!result.isConfirmed) return null;
+        return result.value;
+    }
+
     // Agregar producto a la factura
     $('#agregarProducto').click(function() {
         if (!productoSeleccionado) {
@@ -246,6 +473,7 @@ $(document).ready(function() {
         $('#cliente_id').val('');
         $('#infoCliente').hide();
         $('#formaPago').val('efectivo');
+        pagosFactura = null; // limpiar pago mixto
         limpiarFormularioProducto();
         
         // Solo limpiar el ID si no se indica mantenerlo
@@ -371,10 +599,15 @@ $(document).ready(function() {
             return;
         }
 
-        const factura = {
+        // Si eligieron pago mixto, pedimos el desglose antes de enviar
+        // (para efectivo/transferencia/tarjeta simple, no mostramos modal y enviamos forma_pago como antes)
+        const enviarFactura = (pagosSeleccionados) => {
+            const factura = {
             cliente_id: cliente_id,
             total: totalFactura,
             forma_pago: forma_pago,
+            // pagos[] solo se envía si es mixto (o si el usuario lo definió)
+            pagos: Array.isArray(pagosSeleccionados) ? pagosSeleccionados : undefined,
             productos: productosFactura.map(p => ({
                 producto_id: p.producto_id,
                 cantidad: p.cantidad,
@@ -382,78 +615,94 @@ $(document).ready(function() {
                 unidad: p.unidad,
                 subtotal: p.subtotal
             }))
-        };
+            };
 
-        console.log('Factura a enviar:', factura);
+            console.log('Factura a enviar:', factura);
 
-        // Mostrar indicador de carga
-        Swal.fire({
-            title: 'Generando factura...',
-            allowOutsideClick: false,
-            didOpen: () => {
-                Swal.showLoading();
-            }
-        });
-
-        $.ajax({
-            url: '/api/facturas',
-            method: 'POST',
-            data: JSON.stringify(factura),
-            contentType: 'application/json',
-            success: function(response) {
-                Swal.close();
-                console.log('Factura generada exitosamente:', response);
-                
-                if (response && response.id) {
-                    // Eliminar el pedido de localStorage si existe
-                    const pedidoId = localStorage.getItem('pedidoActualId');
-                    if (pedidoId) {
-                        pedidosGuardados = pedidosGuardados.filter(p => p.id != pedidoId);
-                        actualizarLocalStorage();
-                        localStorage.removeItem('pedidoActualId');
-                    }
-
-                    // Mostrar la factura
-                    const facturaModal = new bootstrap.Modal(document.getElementById('facturaModal'));
-                    const iframeUrl = `/api/facturas/${response.id}/imprimir`;
-                    console.log('URL del iframe:', iframeUrl);
-                    $('#facturaFrame').attr('src', iframeUrl);
-                    facturaModal.show();
-
-                    // Limpiar el formulario
-                    limpiarFormulario();
-                    mostrarAlerta('success', 'Factura generada exitosamente');
-                } else {
-                    mostrarAlerta('error', 'Error: No se recibió el ID de la factura');
+            // Mostrar indicador de carga
+            Swal.fire({
+                title: 'Generando factura...',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
                 }
-            },
-            error: function(xhr, status, error) {
-                Swal.close();
-                console.error('Error al generar factura:', {
-                    status: xhr.status,
-                    statusText: xhr.statusText,
-                    responseText: xhr.responseText,
-                    error: error
-                });
+            });
 
-                let mensajeError = 'Error al generar la factura';
-                if (xhr.status === 0) {
-                    mensajeError = 'No se pudo conectar con el servidor. Por favor, verifica tu conexión.';
-                } else {
-                    try {
-                        const respuesta = JSON.parse(xhr.responseText);
-                        mensajeError = respuesta.error || mensajeError;
-                    } catch (e) {
-                        console.error('Error al parsear respuesta:', e);
-                        if (xhr.responseText) {
-                            mensajeError = xhr.responseText;
+            $.ajax({
+                url: '/api/facturas',
+                method: 'POST',
+                data: JSON.stringify(factura),
+                contentType: 'application/json',
+                success: function(response) {
+                    Swal.close();
+                    console.log('Factura generada exitosamente:', response);
+                    
+                    if (response && response.id) {
+                        // Eliminar el pedido de localStorage si existe
+                        const pedidoId = localStorage.getItem('pedidoActualId');
+                        if (pedidoId) {
+                            pedidosGuardados = pedidosGuardados.filter(p => p.id != pedidoId);
+                            actualizarLocalStorage();
+                            localStorage.removeItem('pedidoActualId');
+                        }
+
+                        // Mostrar la factura
+                        const facturaModal = new bootstrap.Modal(document.getElementById('facturaModal'));
+                    // embed=1 para ocultar el botón "Volver" dentro del iframe (solo dejamos imprimir)
+                    // Relacionado con: routes/facturas.js y views/factura.ejs
+                    const iframeUrl = `/api/facturas/${response.id}/imprimir?embed=1`;
+                        console.log('URL del iframe:', iframeUrl);
+                        $('#facturaFrame').attr('src', iframeUrl);
+                        facturaModal.show();
+
+                        // Limpiar el formulario
+                        limpiarFormulario();
+                        mostrarAlerta('success', 'Factura generada exitosamente');
+                    } else {
+                        mostrarAlerta('error', 'Error: No se recibió el ID de la factura');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    Swal.close();
+                    console.error('Error al generar factura:', {
+                        status: xhr.status,
+                        statusText: xhr.statusText,
+                        responseText: xhr.responseText,
+                        error: error
+                    });
+
+                    let mensajeError = 'Error al generar la factura';
+                    if (xhr.status === 0) {
+                        mensajeError = 'No se pudo conectar con el servidor. Por favor, verifica tu conexión.';
+                    } else {
+                        try {
+                            const respuesta = JSON.parse(xhr.responseText);
+                            mensajeError = respuesta.error || mensajeError;
+                        } catch (e) {
+                            console.error('Error al parsear respuesta:', e);
+                            if (xhr.responseText) {
+                                mensajeError = xhr.responseText;
+                            }
                         }
                     }
+                    
+                    mostrarAlerta('error', mensajeError);
                 }
-                
-                mostrarAlerta('error', mensajeError);
-            }
-        });
+            });
+        };
+
+        if (forma_pago === 'mixto') {
+            pedirPagosMixtos(totalFactura).then(pagos => {
+                if (!pagos) return; // cancelado
+                pagosFactura = pagos;
+                enviarFactura(pagosFactura);
+            });
+            return;
+        }
+
+        // Caso simple (un solo medio): enviamos sin pagos[]
+        pagosFactura = null;
+        enviarFactura(null);
     });
 
     // Ver pedidos guardados

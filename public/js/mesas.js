@@ -6,6 +6,257 @@ $(function() {
   let pedidoActual = null; // { id, mesa_id }
   let items = []; // items del pedido en UI
 
+  // ===== Pago mixto (varios medios) =====
+  // Relacionado con:
+  // - routes/mesas.js (POST /api/mesas/pedidos/:pedidoId/facturar recibe pagos[])
+  // - database.sql -> tabla factura_pagos
+  function parseMoneyInput(value) {
+    // Acepta "10.000", "10000", "10,000.50", etc. Normaliza a Number.
+    const v = String(value ?? '').trim();
+    if (!v) return 0;
+    // Si tiene coma y punto, asumimos coma miles y punto decimal (ej: 10,000.50)
+    // Si solo tiene coma, asumimos coma decimal (ej: 10,5)
+    let normalized = v.replace(/\s/g, '');
+    const hasComma = normalized.includes(',');
+    const hasDot = normalized.includes('.');
+    if (hasComma && hasDot) {
+      normalized = normalized.replace(/,/g, '');
+    } else if (hasComma && !hasDot) {
+      normalized = normalized.replace(/,/g, '.');
+    }
+    // Quitar cualquier caracter no numérico excepto '.' y '-'
+    normalized = normalized.replace(/[^\d.-]/g, '');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function formatMoney(n) {
+    return `$${Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function almostEqualMoney(a, b) {
+    return Math.abs(Number(a) - Number(b)) < 0.01;
+  }
+
+  async function pedirPagosMixtos(total) {
+    // Modal SweetAlert con UI dinámica (agregar/eliminar filas)
+    // Importante: usamos didOpen para enlazar eventos.
+    const result = await Swal.fire({
+      title: 'Forma de pago',
+      html: `
+        <div class="text-start">
+          <div class="small text-muted mb-2">Total a pagar: <strong id="pmTotal">${formatMoney(total)}</strong></div>
+
+          <div id="pmRows" class="vstack gap-2"></div>
+
+          <div class="d-flex gap-2 mt-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="pmAddRow">
+              <i class="bi bi-plus-lg"></i> Agregar medio
+            </button>
+            <div class="ms-auto small text-muted align-self-center">
+              Sumatoria: <strong id="pmSum">${formatMoney(0)}</strong>
+            </div>
+          </div>
+
+          <!-- Indicador de diferencia para guiar al usuario -->
+          <!-- Relacionado con: UX solicitada (mostrar Falta/Sobra) -->
+          <div class="mt-2" id="pmDiffWrap">
+            <span class="badge text-bg-secondary" id="pmDiff">Falta: ${formatMoney(total)}</span>
+          </div>
+
+          <div class="alert alert-warning py-2 px-3 mt-2 mb-0 small" id="pmWarn" style="display:none"></div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Confirmar pago',
+      cancelButtonText: 'Cancelar',
+      focusConfirm: false,
+      didOpen: () => {
+        const rows = document.getElementById('pmRows');
+        const btnAdd = document.getElementById('pmAddRow');
+        const sumEl = document.getElementById('pmSum');
+        const diffEl = document.getElementById('pmDiff');
+        const warnEl = document.getElementById('pmWarn');
+
+        const allowClipboard = (el) => {
+          if (!el) return;
+          // Solo detenemos propagación de eventos que suelen activar atajos globales / offcanvas,
+          // pero NO bloqueamos escritura normal.
+          ['paste','copy','cut','contextmenu'].forEach(evt => {
+            el.addEventListener(evt, (e) => e.stopPropagation());
+          });
+        };
+
+        const rowTemplate = (metodo = 'efectivo', monto = '', referencia = '') => `
+          <div class="border rounded p-2 pm-row">
+            <div class="row g-2 align-items-end">
+              <div class="col-5">
+                <label class="form-label small mb-1">Método</label>
+                <select class="form-select form-select-sm pm-metodo">
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="tarjeta">Tarjeta</option>
+                </select>
+              </div>
+              <div class="col-4">
+                <label class="form-label small mb-1">Monto</label>
+                <input type="text" class="form-control form-control-sm pm-monto" placeholder="0.00" value="${String(monto)}">
+              </div>
+              <div class="col-3 text-end">
+                <button type="button" class="btn btn-outline-danger btn-sm pm-del" title="Eliminar">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Referencia (opcional)</label>
+                <input type="text" class="form-control form-control-sm pm-ref" placeholder="Ej: #transacción / últimos 4 dígitos" value="${String(referencia)}">
+              </div>
+            </div>
+          </div>
+        `;
+
+        // Autocompletar el restante en una fila "no tocada" por el usuario
+        const recalc = (sourceInput = null) => {
+          const montoInputs = Array.from(rows.querySelectorAll('.pm-monto'));
+          const montos = montoInputs.map(i => parseMoneyInput(i.value));
+          const sum = montos.reduce((a, b) => a + b, 0);
+
+          // Indicador Falta/Sobra
+          const diff = Number(total) - Number(sum);
+          if (diffEl) {
+            if (almostEqualMoney(diff, 0)) {
+              diffEl.className = 'badge text-bg-success';
+              diffEl.textContent = 'Listo: total completo';
+            } else if (diff > 0) {
+              diffEl.className = 'badge text-bg-warning';
+              diffEl.textContent = `Falta: ${formatMoney(diff)}`;
+            } else {
+              diffEl.className = 'badge text-bg-danger';
+              diffEl.textContent = `Sobra: ${formatMoney(Math.abs(diff))}`;
+            }
+          }
+
+          sumEl.textContent = formatMoney(sum);
+          warnEl.style.display = 'none';
+
+          // Si falta dinero, intentamos autocompletar el restante en la última fila no tocada
+          // (diferente a la que el usuario está editando).
+          const remaining = Number(total) - Number(sum);
+          if (remaining > 0.009) {
+            const candidate = montoInputs
+              .filter(inp => inp !== sourceInput)
+              .reverse()
+              .find(inp => inp && inp.dataset && inp.dataset.touched !== 'true');
+            if (candidate) {
+              candidate.value = Number(remaining.toFixed(2)).toString();
+              // NO marcar touched aquí: sigue siendo autocompletado
+              // Recalcular sin bucle infinito
+              const montos2 = montoInputs.map(i => parseMoneyInput(i.value));
+              const sum2 = montos2.reduce((a, b) => a + b, 0);
+              sumEl.textContent = formatMoney(sum2);
+              const diff2 = Number(total) - Number(sum2);
+              if (diffEl) {
+                if (almostEqualMoney(diff2, 0)) {
+                  diffEl.className = 'badge text-bg-success';
+                  diffEl.textContent = 'Listo: total completo';
+                } else if (diff2 > 0) {
+                  diffEl.className = 'badge text-bg-warning';
+                  diffEl.textContent = `Falta: ${formatMoney(diff2)}`;
+                } else {
+                  diffEl.className = 'badge text-bg-danger';
+                  diffEl.textContent = `Sobra: ${formatMoney(Math.abs(diff2))}`;
+                }
+              }
+            }
+          }
+        };
+
+        const addRow = (metodo = 'efectivo', monto = '', referencia = '') => {
+          const wrap = document.createElement('div');
+          wrap.innerHTML = rowTemplate(metodo, monto, referencia);
+          const row = wrap.firstElementChild;
+          rows.appendChild(row);
+
+          const sel = row.querySelector('.pm-metodo');
+          const montoEl = row.querySelector('.pm-monto');
+          const refEl = row.querySelector('.pm-ref');
+          const del = row.querySelector('.pm-del');
+
+          if (sel) sel.value = metodo;
+
+          allowClipboard(montoEl);
+          allowClipboard(refEl);
+
+          if (montoEl) {
+            montoEl.dataset.touched = 'false';
+            montoEl.addEventListener('input', () => {
+              montoEl.dataset.touched = 'true';
+              recalc(montoEl);
+            });
+            // Enfoque: seleccionar todo para editar rápido
+            montoEl.addEventListener('focus', () => {
+              try { montoEl.select(); } catch (_) {}
+            });
+          }
+          if (sel) sel.addEventListener('change', () => recalc(montoEl));
+          if (del) del.addEventListener('click', () => { row.remove(); recalc(); });
+
+          // UX: enfocar monto al agregar
+          if (montoEl) setTimeout(() => montoEl.focus(), 0);
+
+          recalc();
+        };
+
+        btnAdd.addEventListener('click', () => addRow('efectivo', '', ''));
+
+        // Fila inicial: por defecto todo en efectivo
+        addRow('efectivo', String(Number(total).toFixed(2)), '');
+
+        // Exponer helpers para preConfirm
+        window.__pm_getRows = () => rows;
+        window.__pm_setWarn = (msg) => {
+          warnEl.textContent = msg;
+          warnEl.style.display = 'block';
+        };
+      },
+      preConfirm: () => {
+        const rows = window.__pm_getRows ? window.__pm_getRows() : null;
+        if (!rows) return false;
+        const pagos = Array.from(rows.querySelectorAll('.pm-row')).map(r => {
+          const metodo = (r.querySelector('.pm-metodo')?.value || '').trim();
+          const monto = parseMoneyInput(r.querySelector('.pm-monto')?.value || 0);
+          const referencia = (r.querySelector('.pm-ref')?.value || '').trim();
+          return { metodo, monto, referencia };
+        }).filter(p => p.metodo && p.monto > 0);
+
+        if (pagos.length === 0) {
+          window.__pm_setWarn && window.__pm_setWarn('Agrega al menos un medio de pago con monto.');
+          return false;
+        }
+
+        const sum = pagos.reduce((a, p) => a + Number(p.monto || 0), 0);
+        if (!almostEqualMoney(sum, total)) {
+          window.__pm_setWarn && window.__pm_setWarn(`La sumatoria (${formatMoney(sum)}) debe ser igual al total (${formatMoney(total)}).`);
+          return false;
+        }
+
+        // Limpieza final
+        return pagos.map(p => ({
+          metodo: p.metodo,
+          monto: Number(p.monto.toFixed(2)),
+          referencia: p.referencia || ''
+        }));
+      },
+      willClose: () => {
+        // Limpieza de variables globales del modal (evitar fugas)
+        try { delete window.__pm_getRows; delete window.__pm_setWarn; } catch (_) {}
+      }
+    });
+
+    if (!result.isConfirmed) return null;
+    return result.value;
+  }
+
   // Tooltips Bootstrap
   document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     try { new bootstrap.Tooltip(el); } catch (_) { /* noop */ }
@@ -238,15 +489,31 @@ $(function() {
       const cliente = await runWithOffcanvasHidden(() => seleccionarClienteConBusqueda());
       if(!cliente) return; // cancelado
       const cliente_id = cliente.id;
-      const forma_pago = await runWithOffcanvasHidden(async () => {
-        const { value } = await Swal.fire({ title:'Forma de pago', input:'select', inputOptions:{ efectivo:'Efectivo', transferencia:'Transferencia'}, inputValue:'efectivo', showCancelButton:true });
-        return value;
+
+      // Total del pedido basado en items actuales (mismo cálculo del render)
+      const totalPedido = (items || []).reduce((acc, it) => {
+        const cantidad = Number(it.cantidad || 0);
+        const precio = Number((it.precio_unitario != null ? it.precio_unitario : it.precio) || 0);
+        const subtotal = Number(it.subtotal != null ? it.subtotal : (cantidad * precio));
+        return acc + subtotal;
+      }, 0);
+
+      // Modal de pago mixto (permite 1 o varios medios)
+      const pagos = await runWithOffcanvasHidden(async () => {
+        return await pedirPagosMixtos(totalPedido);
       });
-      if(!forma_pago) return;
-      const resp = await fetch(`/api/mesas/pedidos/${pedidoActual.id}/facturar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cliente_id, forma_pago }) });
+      if(!pagos) return;
+
+      const resp = await fetch(`/api/mesas/pedidos/${pedidoActual.id}/facturar`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ cliente_id, pagos })
+      });
       const data = await resp.json();
       if(!resp.ok) throw new Error(data.error||'Error al facturar');
-      window.location.href = `/api/facturas/${data.factura_id}/imprimir`;
+      // En Mesas queremos volver a /mesas (no al index) desde la vista de impresión
+      // Relacionado con: routes/facturas.js (usa return_to seguro) y views/factura.ejs (botón Volver)
+      window.location.href = `/api/facturas/${data.factura_id}/imprimir?return_to=${encodeURIComponent('/mesas')}`;
     }catch(err){
       Swal.fire({icon:'error', title: err.message});
     }
@@ -255,18 +522,46 @@ $(function() {
   // Ocultar temporalmente el panel lateral (offcanvas) durante modales para evitar bloquear copiar/pegar
   async function runWithOffcanvasHidden(action){
     const el = document.getElementById('canvasPedido');
-    const wasOpen = el && el.classList.contains('show');
-    if(wasOpen){
-      try{ canvas.hide(); }catch(_){/* noop */}
-      // esperar a que termine animación
-      await new Promise(r => setTimeout(r, 250));
+    const isShown = (node) => !!node && (node.classList.contains('show') || node.classList.contains('showing'));
+
+    const waitFor = (node, eventName, timeoutMs = 1200) => {
+      return new Promise(resolve => {
+        if (!node) return resolve();
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          try { node.removeEventListener(eventName, onEvt); } catch (_) {}
+          if (t) clearTimeout(t);
+          resolve();
+        };
+        const onEvt = () => finish();
+        node.addEventListener(eventName, onEvt, { once: true });
+        const t = setTimeout(finish, timeoutMs);
+      });
+    };
+
+    const wasOpen = isShown(el);
+    if (wasOpen) {
+      try {
+        // Usar la instancia real (evita conflictos si Bootstrap creó otra internamente)
+        bootstrap.Offcanvas.getOrCreateInstance(el).hide();
+      } catch (_) {
+        try { canvas.hide(); } catch (_2) { /* noop */ }
+      }
+      // Esperar al evento real (evita que el offcanvas siga "capturando" foco detrás del SweetAlert)
+      await waitFor(el, 'hidden.bs.offcanvas', 1200);
     }
     try{
       const result = await action();
       return result;
     } finally {
       if(wasOpen){
-        try{ canvas.show(); }catch(_){/* noop */}
+        try {
+          bootstrap.Offcanvas.getOrCreateInstance(el).show();
+        } catch (_) {
+          try { canvas.show(); } catch (_2) { /* noop */ }
+        }
       }
     }
   }

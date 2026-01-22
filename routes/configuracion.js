@@ -52,13 +52,41 @@ router.get('/', async (req, res) => {
                     nit: '',
                     pie_pagina: '',
                     ancho_papel: 80,
-                    font_size: 1
+                    font_size: 1,
+                    // Previsualizadores (vacíos en configuración por defecto)
+                    logo_src: null,
+                    qr_src: null
                 }
             });
         }
 
-        // No enviar los datos binarios de las imágenes a la vista
+        // Construir previsualización (data URL) si ya hay logo/QR guardados
+        // Relacionado con: views/configuracion.ejs (muestra "Logo actual" y "QR actual")
         const configSinImagenes = { ...config[0] };
+        if (configSinImagenes.logo_data) {
+            try {
+                const logoBuffer = Buffer.from(configSinImagenes.logo_data);
+                const tipo = configSinImagenes.logo_tipo || 'png';
+                configSinImagenes.logo_src = `data:image/${tipo};base64,${logoBuffer.toString('base64')}`;
+            } catch (_) {
+                configSinImagenes.logo_src = null;
+            }
+        } else {
+            configSinImagenes.logo_src = null;
+        }
+        if (configSinImagenes.qr_data) {
+            try {
+                const qrBuffer = Buffer.from(configSinImagenes.qr_data);
+                const tipo = configSinImagenes.qr_tipo || 'png';
+                configSinImagenes.qr_src = `data:image/${tipo};base64,${qrBuffer.toString('base64')}`;
+            } catch (_) {
+                configSinImagenes.qr_src = null;
+            }
+        } else {
+            configSinImagenes.qr_src = null;
+        }
+
+        // No enviar los datos binarios de las imágenes a la vista (solo logo_src/qr_src)
         delete configSinImagenes.logo_data;
         delete configSinImagenes.qr_data;
 

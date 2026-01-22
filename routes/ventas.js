@@ -2,34 +2,124 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+/**
+ * Construye cláusula WHERE y params para filtros de ventas.
+ * Relacionado con:
+ * - views/ventas.ejs (filtros por fecha y búsqueda)
+ * - routes/ventas.js (listado y export)
+ */
+function buildVentasWhere(queryParams) {
+    const where = [];
+    const params = [];
+
+    if (queryParams.desde && queryParams.hasta) {
+        where.push('DATE(f.fecha) BETWEEN ? AND ?');
+        params.push(queryParams.desde, queryParams.hasta);
+    }
+
+    if (queryParams.q) {
+        where.push('(c.nombre LIKE ? OR f.id LIKE ?)');
+        const term = `%${queryParams.q}%`;
+        params.push(term, term);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return { whereSql, params };
+}
+
+/**
+ * Calcula totales por método usando factura_pagos (incluye facturas mixtas).
+ * Si una factura no tiene registros en factura_pagos (legacy), cae a f.forma_pago + f.total.
+ */
+async function getTotalesPorMetodo(queryParams) {
+    const { whereSql, params } = buildVentasWhere(queryParams);
+
+    // Para el segundo SELECT (fallback) necesitamos agregar condición fp2.id IS NULL
+    const whereSqlFallback = whereSql
+        ? `${whereSql} AND fp2.id IS NULL`
+        : 'WHERE fp2.id IS NULL';
+
+    // params se usa dos veces (UNION)
+    const unionParams = [...params, ...params];
+
+    // Solo totalizamos los métodos reales (no "mixto")
+    const sql = `
+        SELECT metodo, SUM(monto) AS total
+        FROM (
+            -- Facturas con pagos detallados
+            SELECT fp.metodo AS metodo, fp.monto AS monto
+            FROM factura_pagos fp
+            JOIN facturas f ON f.id = fp.factura_id
+            JOIN clientes c ON f.cliente_id = c.id
+            ${whereSql}
+
+            UNION ALL
+
+            -- Fallback legacy: facturas sin registros en factura_pagos
+            SELECT f.forma_pago AS metodo, f.total AS monto
+            FROM facturas f
+            JOIN clientes c ON f.cliente_id = c.id
+            LEFT JOIN factura_pagos fp2 ON fp2.factura_id = f.id
+            ${whereSqlFallback}
+        ) t
+        WHERE t.metodo IN ('efectivo','transferencia','tarjeta')
+        GROUP BY t.metodo
+    `;
+
+    const totales = { efectivo: 0, transferencia: 0, tarjeta: 0, general: 0 };
+
+    try {
+        const [rows] = await db.query(sql, unionParams);
+        (rows || []).forEach(r => {
+            const metodo = String(r.metodo || '').toLowerCase();
+            const val = Number(r.total || 0);
+            if (metodo === 'efectivo') totales.efectivo = val;
+            if (metodo === 'transferencia') totales.transferencia = val;
+            if (metodo === 'tarjeta') totales.tarjeta = val;
+        });
+    } catch (err) {
+        // Si no existe factura_pagos (instalación vieja), no rompemos: fallback a forma_pago
+        try {
+            const sqlOld = `
+                SELECT f.forma_pago AS metodo, SUM(f.total) AS total
+                FROM facturas f
+                JOIN clientes c ON f.cliente_id = c.id
+                ${whereSql}
+                GROUP BY f.forma_pago
+            `;
+            const [rowsOld] = await db.query(sqlOld, params);
+            (rowsOld || []).forEach(r => {
+                const metodo = String(r.metodo || '').toLowerCase();
+                const val = Number(r.total || 0);
+                if (metodo === 'efectivo') totales.efectivo = val;
+                if (metodo === 'transferencia') totales.transferencia = val;
+                if (metodo === 'tarjeta') totales.tarjeta = val;
+            });
+        } catch (_) {
+            // si todo falla, dejamos en 0
+        }
+        console.error('Error calculando totales por método:', err);
+    }
+
+    totales.general = Number(totales.efectivo) + Number(totales.transferencia) + Number(totales.tarjeta);
+    return totales;
+}
+
 // Ruta principal de ventas con filtros opcionales por fecha
 router.get('/', async (req, res) => {
     try {
-        let query = `
+        const { whereSql, params } = buildVentasWhere(req.query);
+        const query = `
             SELECT f.*, c.nombre as cliente_nombre
             FROM facturas f
             JOIN clientes c ON f.cliente_id = c.id
-            WHERE 1=1
+            ${whereSql}
+            ORDER BY f.fecha DESC
         `;
-        const params = [];
-
-        // Aplicar filtros de fecha si existen
-        if (req.query.desde && req.query.hasta) {
-            query += ` AND DATE(f.fecha) BETWEEN ? AND ?`;
-            params.push(req.query.desde, req.query.hasta);
-        }
-
-        // Ordenar por fecha descendente
-        if (req.query.q) {
-            query += ` AND (c.nombre LIKE ? OR f.id LIKE ?)`;
-            const term = `%${req.query.q}%`;
-            params.push(term, term);
-        }
-
-        query += ` ORDER BY f.fecha DESC`;
 
         const [ventas] = await db.query(query, params);
-        res.render('ventas', { ventas });
+        const totales = await getTotalesPorMetodo(req.query);
+        res.render('ventas', { ventas, totales });
     } catch (error) {
         console.error('Error al obtener ventas:', error);
         res.status(500).send('Error al cargar el historial de ventas');
@@ -46,26 +136,17 @@ router.get('/export', async (req, res) => {
         } catch (e) {
             return res.status(500).send('Exportación a Excel no disponible. Instale la dependencia con: npm install exceljs');
         }
-        let query = `
+        const { whereSql, params } = buildVentasWhere(req.query);
+        const query = `
             SELECT f.id, f.fecha, c.nombre as cliente, f.forma_pago, f.total
             FROM facturas f
             JOIN clientes c ON f.cliente_id = c.id
-            WHERE 1=1
+            ${whereSql}
         `;
-        const params = [];
+        const queryFinal = `${query} ORDER BY f.fecha DESC`;
 
-        if (req.query.desde && req.query.hasta) {
-            query += ` AND DATE(f.fecha) BETWEEN ? AND ?`;
-            params.push(req.query.desde, req.query.hasta);
-        }
-        if (req.query.q) {
-            query += ` AND (c.nombre LIKE ? OR f.id LIKE ?)`;
-            const term = `%${req.query.q}%`;
-            params.push(term, term);
-        }
-        query += ` ORDER BY f.fecha DESC`;
-
-        const [rows] = await db.query(query, params);
+        const [rows] = await db.query(queryFinal, params);
+        const totales = await getTotalesPorMetodo(req.query);
 
         // Crear Excel con ExcelJS
         const wb = new ExcelJS.Workbook();
@@ -127,12 +208,12 @@ router.get('/export', async (req, res) => {
         ws.getColumn(5).width = 14;
 
         // Datos y totales
-        let totalEfectivo = 0, totalTransferencia = 0, totalGeneral = 0;
+        let totalEfectivo = 0, totalTransferencia = 0, totalTarjeta = 0, totalGeneral = 0;
         rows.forEach(r => {
             const fecha = new Date(r.fecha);
             const total = Number(r.total || 0);
             totalGeneral += total;
-            if ((r.forma_pago || '') === 'efectivo') totalEfectivo += total; else if ((r.forma_pago || '') === 'transferencia') totalTransferencia += total;
+            // Para Excel: mantenemos el cálculo general por facturas, pero los totales por método vienen de factura_pagos
             ws.addRow([
                 r.id,
                 fecha.toLocaleString(),
@@ -141,6 +222,13 @@ router.get('/export', async (req, res) => {
                 total
             ]);
         });
+
+        // Totales por método (desde pagos)
+        totalEfectivo = Number(totales.efectivo || 0);
+        totalTransferencia = Number(totales.transferencia || 0);
+        totalTarjeta = Number(totales.tarjeta || 0);
+        // totalGeneral del footer: suma por método para consistencia con pago mixto
+        totalGeneral = Number(totales.general || (totalEfectivo + totalTransferencia + totalTarjeta));
 
         // Zebra striping para legibilidad
         const firstDataRow = headerRow.number + 1;
@@ -158,6 +246,7 @@ router.get('/export', async (req, res) => {
         ws.addRow([]);
         ws.addRow(['', '', 'Total Efectivo:', '', totalEfectivo]).font = { bold: true };
         ws.addRow(['', '', 'Total Transferencia:', '', totalTransferencia]).font = { bold: true };
+        ws.addRow(['', '', 'Total Tarjeta:', '', totalTarjeta]).font = { bold: true };
         ws.addRow(['', '', 'Total General:', '', totalGeneral]).font = { bold: true };
         for (let i = start; i <= ws.rowCount; i++) {
             ws.getRow(i).getCell(5).numFmt = '[$$-409]#,##0.00';

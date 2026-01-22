@@ -25,8 +25,24 @@ CREATE TABLE IF NOT EXISTS facturas (
     cliente_id INT,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     total DECIMAL(10,2) NOT NULL,
-    forma_pago ENUM('efectivo', 'transferencia') NOT NULL DEFAULT 'efectivo',
+    -- forma_pago se mantiene por compatibilidad (reportes/ventas), pero si hay varios pagos se guarda como 'mixto'
+    forma_pago ENUM('efectivo', 'transferencia', 'tarjeta', 'mixto') NOT NULL DEFAULT 'efectivo',
     FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+-- Pagos por factura (permite pago mixto: varias filas por la misma factura)
+-- Relacionado con:
+-- - routes/facturas.js (POST /api/facturas guarda aquí)
+-- - routes/mesas.js (POST /api/mesas/pedidos/:id/facturar guarda aquí)
+-- - views/factura.ejs (imprime el detalle de pagos)
+CREATE TABLE IF NOT EXISTS factura_pagos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    factura_id INT NOT NULL,
+    metodo ENUM('efectivo', 'transferencia', 'tarjeta') NOT NULL,
+    monto DECIMAL(10,2) NOT NULL,
+    referencia VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS detalle_factura (
@@ -99,4 +115,24 @@ CREATE TABLE IF NOT EXISTS pedido_items (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
     FOREIGN KEY (producto_id) REFERENCES productos(id)
+);
+
+-- ===========================
+-- MIGRACIÓN (si ya tienes BD creada)
+-- Ejecuta estos ALTER/CREATE en tu base ya existente para habilitar pago mixto.
+-- ===========================
+
+-- 1) Agregar métodos extra al ENUM de facturas.forma_pago (incluye 'tarjeta' y 'mixto')
+ALTER TABLE facturas
+    MODIFY forma_pago ENUM('efectivo','transferencia','tarjeta','mixto') NOT NULL DEFAULT 'efectivo';
+
+-- 2) Crear tabla de pagos por factura (si aún no existe)
+CREATE TABLE IF NOT EXISTS factura_pagos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    factura_id INT NOT NULL,
+    metodo ENUM('efectivo', 'transferencia', 'tarjeta') NOT NULL,
+    monto DECIMAL(10,2) NOT NULL,
+    referencia VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE CASCADE
 );

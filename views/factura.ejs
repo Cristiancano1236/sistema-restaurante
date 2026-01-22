@@ -109,7 +109,13 @@
 <body>
     <div class="no-print" style="text-align: center; margin-bottom: 20px;">
         <button onclick="window.print()" class="print-button">Imprimir Factura</button>
-        <button onclick="window.location.href='/'" class="print-button" style="background: #6c757d;">Volver</button>
+        <!-- Botón Volver: solo se muestra en pantalla completa (no en iframe/modal) -->
+        <!-- Relacionado con: routes/facturas.js (embed=1 cuando se abre desde index/ventas) -->
+        <% if (!(typeof embed !== 'undefined' && embed)) { %>
+            <!-- Por defecto regresa al index, pero si viene desde Mesas se inyecta return_to='/mesas' -->
+            <!-- Relacionado con: routes/facturas.js (GET /api/facturas/:id/imprimir -> return_to) -->
+            <button onclick="window.location.href='<%= (typeof return_to !== "undefined" && return_to) ? return_to : "/" %>'" class="print-button" style="background: #6c757d;">Volver</button>
+        <% } %>
     </div>
 
     <div class="factura">
@@ -177,7 +183,23 @@
         <div class="divider"></div>
 
         <div class="text-center small">
-            <div><strong>Forma de Pago:</strong> <%= factura.forma_pago.charAt(0).toUpperCase() + factura.forma_pago.slice(1) %></div>
+            <!-- Pagos (pago mixto) -->
+            <!-- Relacionado con: routes/facturas.js (GET /api/facturas/:id/imprimir) que envía 'pagos' -->
+            <% if (typeof pagos !== 'undefined' && pagos && pagos.length > 0) { %>
+                <div class="mb-2"><strong>Pagos:</strong></div>
+                <% pagos.forEach(function(p) { %>
+                    <div>
+                        <strong><%= (p.metodo || '').charAt(0).toUpperCase() + (p.metodo || '').slice(1) %>:</strong>
+                        $<%= Number(p.monto || 0).toLocaleString('es-CO') %>
+                        <% if (p.referencia) { %>
+                            <span class="small">(<%= p.referencia %>)</span>
+                        <% } %>
+                    </div>
+                <% }); %>
+            <% } else { %>
+                <div><strong>Forma de Pago:</strong> <%= factura.forma_pago.charAt(0).toUpperCase() + factura.forma_pago.slice(1) %></div>
+            <% } %>
+
             <% if (config.qr_src) { %>
                 <div class="mt-3 mb-3">
                     <img src="<%= config.qr_src %>" alt="QR para transferencia" style="max-width: 150px;">

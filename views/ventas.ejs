@@ -164,6 +164,11 @@
                                 <td></td>
                             </tr>
                             <tr>
+                                <td colspan="3" class="text-end">Total Tarjeta:</td>
+                                <td colspan="2" class="text-end" id="totalTarjeta">$0.00</td>
+                                <td></td>
+                            </tr>
+                            <tr>
                                 <td colspan="3" class="text-end">Total General:</td>
                                 <td colspan="2" class="text-end" id="totalGeneral">$0.00</td>
                                 <td></td>
@@ -268,7 +273,9 @@
         }
 
         function mostrarFactura(id) {
-            document.getElementById('facturaFrame').src = `/api/facturas/${id}/imprimir`;
+            // embed=1 para ocultar el botón "Volver" dentro del iframe (reimpresión desde ventas)
+            // Relacionado con: routes/facturas.js y views/factura.ejs
+            document.getElementById('facturaFrame').src = `/api/facturas/${id}/imprimir?embed=1`;
             document.querySelector('#facturaModal .modal-title').textContent = `Factura #${id}`;
             facturaModal.show();
         }
@@ -285,10 +292,29 @@
                     `);
 
                     // Información de la factura
+                    // Nota: si existe pago mixto, el backend devuelve data.pagos[]
                     $('#detallesFactura').html(`
                         <p><strong>Factura #:</strong> ${data.factura.id}</p>
                         <p><strong>Fecha:</strong> ${new Date(data.factura.fecha).toLocaleString()}</p>
                         <p><strong>Forma de Pago:</strong> ${data.factura.forma_pago.charAt(0).toUpperCase() + data.factura.forma_pago.slice(1)}</p>
+                        ${
+                            Array.isArray(data.pagos) && data.pagos.length > 0
+                            ? `
+                                <div class="mt-2">
+                                    <strong>Pagos:</strong>
+                                    <ul class="mb-0">
+                                        ${data.pagos.map(p => `
+                                            <li>
+                                                <strong>${(p.metodo||'').charAt(0).toUpperCase() + (p.metodo||'').slice(1)}:</strong>
+                                                $${Number(p.monto||0).toFixed(2)}
+                                                ${p.referencia ? `<span class="text-muted">(${p.referencia})</span>` : ''}
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                              `
+                            : ``
+                        }
                     `);
 
                     // Productos
@@ -371,24 +397,23 @@
         const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
         const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
 
-        // Función para calcular el total general
-        function calcularTotales() {
-            const totales = document.querySelectorAll('tbody#ventasTabla td[data-total]');
-            let total = 0, tef = 0, ttr = 0;
-            document.querySelectorAll('#ventasTabla tr').forEach(tr => {
-                const totalEl = tr.querySelector('[data-total]');
-                const forma = tr.children[3]?.innerText?.trim().toLowerCase();
-                const val = Number(totalEl?.dataset.total||0);
-                total += val;
-                if (forma === 'efectivo') tef += val; else if (forma === 'transferencia') ttr += val;
-            });
-            document.getElementById('totalGeneral').textContent = `$${total.toFixed(2)}`;
+        // Totales por método (servidor) usando factura_pagos (incluye pago mixto)
+        // Relacionado con: routes/ventas.js -> getTotalesPorMetodo()
+        function aplicarTotalesServidor() {
+            const t = <%- JSON.stringify(totales || {}) %>;
+            const tef = Number(t.efectivo || 0);
+            const ttr = Number(t.transferencia || 0);
+            const tta = Number(t.tarjeta || 0);
+            const tge = Number(t.general || (tef + ttr + tta));
+
             document.getElementById('totalEfectivo').textContent = `$${tef.toFixed(2)}`;
             document.getElementById('totalTransferencia').textContent = `$${ttr.toFixed(2)}`;
+            document.getElementById('totalTarjeta').textContent = `$${tta.toFixed(2)}`;
+            document.getElementById('totalGeneral').textContent = `$${tge.toFixed(2)}`;
         }
 
-        // Calcular total al cargar la página
-        calcularTotales();
+        // Aplicar al cargar la página (ya incluye filtros por fecha/búsqueda)
+        aplicarTotalesServidor();
 
         // Manejador para reimprimir facturas y ver detalles
         document.querySelectorAll('.btn-reimprimir').forEach(button => {

@@ -280,9 +280,9 @@ router.put('/items/:itemId/estado', async (req, res) => {
 // POST /mesas/pedidos/:pedidoId/facturar - API: genera factura desde pedido y cierra mesa
 router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
     const pedidoId = req.params.pedidoId;
-    const { cliente_id, forma_pago } = req.body || {};
+    const { cliente_id, forma_pago, pagos } = req.body || {};
     if (!cliente_id) return res.status(400).json({ error: 'cliente_id requerido para facturar' });
-    if (!forma_pago) return res.status(400).json({ error: 'forma_pago requerido' });
+    // forma_pago se mantiene por compatibilidad, pero lo recomendado es enviar pagos[] (pago mixto)
     try {
         const connection = await db.getConnection();
         try {
@@ -300,9 +300,37 @@ router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
 
             const total = items.reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
 
+            // ===== Pago mixto: validar pagos[] si se envía =====
+            // Relacionado con: public/js/mesas.js (modal de pagos)
+            const normalizarPagos = (arr) => {
+                if (!Array.isArray(arr)) return [];
+                return arr
+                    .filter(p => p && typeof p === 'object')
+                    .map(p => ({
+                        metodo: String(p.metodo || '').toLowerCase().trim(),
+                        monto: Number(p.monto || 0),
+                        referencia: (p.referencia != null && String(p.referencia).trim() !== '') ? String(p.referencia).trim() : null
+                    }))
+                    .filter(p => ['efectivo', 'transferencia', 'tarjeta'].includes(p.metodo) && Number.isFinite(p.monto) && p.monto > 0);
+            };
+            const pagosNorm = normalizarPagos(pagos);
+            const sumaPagos = pagosNorm.reduce((acc, p) => acc + Number(p.monto || 0), 0);
+            const almostEqualMoney = (a, b) => Math.abs(Number(a) - Number(b)) < 0.01;
+
+            let formaPagoDB = String(forma_pago || 'efectivo').toLowerCase();
+            if (pagosNorm.length > 0) {
+                if (!almostEqualMoney(sumaPagos, total)) {
+                    throw new Error('La suma de pagos no coincide con el total');
+                }
+                formaPagoDB = (pagosNorm.length === 1) ? pagosNorm[0].metodo : 'mixto';
+            } else {
+                // Compatibilidad: si no envían pagos, usamos forma_pago (y creamos 1 registro en factura_pagos)
+                if (!['efectivo', 'transferencia', 'tarjeta', 'mixto'].includes(formaPagoDB)) formaPagoDB = 'efectivo';
+            }
+
             const [facturaInsert] = await connection.query(
                 `INSERT INTO facturas (cliente_id, total, forma_pago) VALUES (?, ?, ?)`,
-                [cliente_id, total, forma_pago]
+                [cliente_id, total, formaPagoDB]
             );
             const facturaId = facturaInsert.insertId;
 
@@ -318,6 +346,24 @@ router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
                 `INSERT INTO detalle_factura (factura_id, producto_id, cantidad, precio_unitario, unidad_medida, subtotal) VALUES ?`,
                 [detallesValues]
             );
+
+            // Guardar pagos en factura_pagos (si existe la tabla)
+            try {
+                if (pagosNorm.length > 0) {
+                    const pagosValues = pagosNorm.map(p => ([facturaId, p.metodo, p.monto, p.referencia]));
+                    await connection.query(
+                        'INSERT INTO factura_pagos (factura_id, metodo, monto, referencia) VALUES ?',
+                        [pagosValues]
+                    );
+                } else {
+                    await connection.query(
+                        'INSERT INTO factura_pagos (factura_id, metodo, monto, referencia) VALUES (?, ?, ?, ?)',
+                        [facturaId, (formaPagoDB === 'mixto' ? 'efectivo' : formaPagoDB), total, null]
+                    );
+                }
+            } catch (_) {
+                // Si la tabla no existe, no rompemos la facturación
+            }
 
             await connection.query(`UPDATE pedidos SET estado = 'cerrado', total = ? WHERE id = ?`, [total, pedidoId]);
             await connection.query(`UPDATE mesas SET estado = 'libre' WHERE id = ?`, [pedido.mesa_id]);

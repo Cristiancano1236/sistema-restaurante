@@ -47,17 +47,55 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label class="form-label">Logo del Negocio</label>
-                            <input type="file" class="form-control" name="logo" accept="image/*">
-                            <% if (config.logo_src) { %>
-                                <img src="<%= config.logo_src %>" alt="Logo actual" class="mt-2" style="max-width: 200px;">
-                            <% } %>
+                            <!-- Input de logo: guarda en configuracion_impresion.logo_data/logo_tipo (routes/configuracion.js) -->
+                            <input id="inputLogo" type="file" class="form-control" name="logo" accept="image/*">
+
+                            <!-- Estado + previsualización (si ya existe en BD o si el usuario selecciona uno nuevo) -->
+                            <div class="mt-2">
+                                <% if (config.logo_src) { %>
+                                    <div class="small text-success mb-1">
+                                        <i class="bi bi-check-circle me-1"></i>Logo guardado actualmente
+                                    </div>
+                                <% } else { %>
+                                    <div class="small text-muted mb-1">
+                                        <i class="bi bi-info-circle me-1"></i>No hay logo guardado
+                                    </div>
+                                <% } %>
+
+                                <img
+                                    id="previewLogo"
+                                    src="<%= config.logo_src || '' %>"
+                                    alt="Previsualización de Logo"
+                                    class="border rounded p-1 bg-white"
+                                    style="max-width: 200px; display: <%= config.logo_src ? 'block' : 'none' %>;"
+                                >
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">QR para Transferencias</label>
-                            <input type="file" class="form-control" name="qr" accept="image/*">
-                            <% if (config.qr_src) { %>
-                                <img src="<%= config.qr_src %>" alt="QR actual" class="mt-2" style="max-width: 150px;">
-                            <% } %>
+                            <!-- Input de QR: guarda en configuracion_impresion.qr_data/qr_tipo (routes/configuracion.js) -->
+                            <input id="inputQr" type="file" class="form-control" name="qr" accept="image/*">
+
+                            <!-- Estado + previsualización -->
+                            <div class="mt-2">
+                                <% if (config.qr_src) { %>
+                                    <div class="small text-success mb-1">
+                                        <i class="bi bi-check-circle me-1"></i>QR guardado actualmente
+                                    </div>
+                                <% } else { %>
+                                    <div class="small text-muted mb-1">
+                                        <i class="bi bi-info-circle me-1"></i>No hay QR guardado
+                                    </div>
+                                <% } %>
+
+                                <img
+                                    id="previewQr"
+                                    src="<%= config.qr_src || '' %>"
+                                    alt="Previsualización de QR"
+                                    class="border rounded p-1 bg-white"
+                                    style="max-width: 150px; display: <%= config.qr_src ? 'block' : 'none' %>;"
+                                >
+                            </div>
                         </div>
                     </div>
                     <div class="row mb-3">
@@ -103,5 +141,31 @@
 
     <script src="/vendor/jquery/jquery.min.js"></script>
     <script src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Previsualización inmediata de imágenes antes de guardar
+        // Relacionado con: inputs #inputLogo y #inputQr en esta vista
+        (function initPrevisualizadores() {
+            function previewFile(inputEl, imgEl) {
+                if (!inputEl || !imgEl) return;
+                inputEl.addEventListener('change', function() {
+                    const file = inputEl.files && inputEl.files[0];
+                    if (!file) return;
+                    if (!file.type || !file.type.startsWith('image/')) return;
+
+                    const url = URL.createObjectURL(file);
+                    imgEl.src = url;
+                    imgEl.style.display = 'block';
+
+                    // Liberar el blob url cuando cargue (evita fugas de memoria)
+                    imgEl.onload = function() {
+                        try { URL.revokeObjectURL(url); } catch (_) {}
+                    };
+                });
+            }
+
+            previewFile(document.getElementById('inputLogo'), document.getElementById('previewLogo'));
+            previewFile(document.getElementById('inputQr'), document.getElementById('previewQr'));
+        })();
+    </script>
 </body>
 </html> 
