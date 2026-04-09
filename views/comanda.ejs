@@ -5,72 +5,217 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Comanda Mesa <%= pedido.mesa_numero %></title>
     <style>
-        @media print {
-            body {
-                width: <%= Number(config.ancho_papel || 80) %>mm;
-                margin: 0;
-                padding: 6px;
-                font-size: <%= Number(config.font_size || 1) === 2 ? '1.1em' : '1em' %>;
-            }
-            .no-print { display: none; }
+        /* ====================================================
+           REGLA @page — CRÍTICA para impresoras térmicas.
+           Sin esto el navegador agrega encabezados/pies con URLs,
+           márgenes grandes y números de página.
+           Relacionado con: routes/mesas.js (GET /pedidos/:id/comanda)
+           ==================================================== */
+        @page {
+            margin: 0mm 0mm 6mm 0mm;
+            size: <%= Number(config.ancho_papel || 80) %>mm auto;
         }
+
+        * { box-sizing: border-box; }
+
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Courier New', Courier, monospace;
             max-width: <%= Number(config.ancho_papel || 80) %>mm;
             margin: 0 auto;
-            padding: 8px;
+            padding: 4mm;
+            font-size: <%= Number(config.font_size || 1) === 2 ? '12pt' : '10pt' %>;
+            color: #000;
+            background: #fff;
         }
+
+        @media print {
+            html, body {
+                width: <%= Number(config.ancho_papel || 80) %>mm;
+                max-width: <%= Number(config.ancho_papel || 80) %>mm;
+                margin: 0;
+                padding: 3mm 3mm 8mm 3mm;
+                font-size: <%= Number(config.font_size || 1) === 2 ? '12pt' : '10pt' %>;
+                background: #fff !important;
+                color: #000 !important;
+            }
+            .no-print { display: none !important; }
+            .linea { page-break-inside: avoid; break-inside: avoid; }
+        }
+
         .center { text-align: center; }
-        .muted { color: #666; font-size: .85em; }
-        .divider { border-top: 1px dashed #000; margin: 8px 0; }
-        .linea { padding: 6px 0; border-bottom: 1px dotted #ddd; }
-        .nota { font-size: .9em; color: #a40000; margin-top: 2px; }
+        .bold   { font-weight: bold; }
+        .small  { font-size: 0.82em; }
+        .muted  { color: #555; }
+
+        .divider {
+            border: none;
+            border-top: 1px dashed #000;
+            margin: 3mm 0;
+        }
+
+        /* Encabezado del negocio */
+        .negocio-nombre {
+            font-size: 1.15em;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            text-align: center;
+        }
+
+        /* Badge de mesa grande y llamativo */
+        .mesa-wrap {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 2mm 0;
+        }
+        .mesa-label { font-size: 0.78em; text-transform: uppercase; color: #555; }
+        .mesa-num   { font-size: 1.6em; font-weight: bold; line-height: 1; }
+
+        /* Título "COMANDA" centrado */
+        .titulo-comanda {
+            font-size: 1.1em;
+            font-weight: bold;
+            letter-spacing: 3px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        /* Cada línea de producto */
+        .linea {
+            display: flex;
+            align-items: flex-start;
+            gap: 2mm;
+            padding: 2mm 0;
+            border-bottom: 1px dotted #aaa;
+        }
+        .linea:last-child { border-bottom: none; }
+
+        /* Cuadro de cantidad */
+        .linea-qty {
+            min-width: 10mm;
+            text-align: center;
+            font-size: 1.25em;
+            font-weight: bold;
+            background: #000;
+            color: #fff;
+            padding: 1mm 2mm;
+            border-radius: 2px;
+            flex-shrink: 0;
+            line-height: 1.2;
+        }
+
+        .linea-info    { flex: 1; }
+        .linea-nombre  { font-weight: bold; font-size: 1em; }
+        .nota {
+            font-size: 0.82em;
+            color: #a00;
+            font-style: italic;
+            margin-top: 1mm;
+        }
+
+        /* ====================================================
+           Barra de controles visible solo en pantalla
+           ==================================================== */
+        .no-print {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            padding: 6px 10px;
+            text-align: center;
+            margin: -4mm -4mm 4mm -4mm;
+        }
+        .btn-imprimir {
+            background: #198754; color: #fff; border: none;
+            padding: 5px 14px; border-radius: 4px;
+            cursor: pointer; font-size: 0.88em; margin: 2px;
+            font-family: inherit;
+        }
+        .btn-cerrar {
+            background: #6c757d; color: #fff; border: none;
+            padding: 5px 14px; border-radius: 4px;
+            cursor: pointer; font-size: 0.88em; margin: 2px;
+            font-family: inherit;
+        }
+        .printer-hint {
+            font-size: 0.72em;
+            color: #666;
+            margin-top: 3px;
+        }
     </style>
 </head>
 <body>
-    <div class="no-print center" style="margin-bottom: 10px;">
-        <button onclick="window.print()">Imprimir comanda</button>
-        <button onclick="window.close()">Cerrar</button>
-        <div class="muted" style="margin-top:6px;">
+
+    <!-- Controles solo en pantalla (no imprimen) -->
+    <div class="no-print">
+        <button class="btn-imprimir" onclick="window.print()">&#128438; Imprimir comanda</button>
+        <button class="btn-cerrar"   onclick="window.close()">&#10005; Cerrar</button>
+        <div class="printer-hint">
             Impresora sugerida: <strong><%= config.impresora_comandas || 'Predeterminada del sistema' %></strong>
+            &nbsp;·&nbsp; Papel: <strong><%= Number(config.ancho_papel || 80) %>mm</strong>
         </div>
     </div>
 
-    <div class="center">
-        <strong><%= config.nombre_negocio || 'Comanda' %></strong>
-    </div>
-    <div class="muted center">
-        <div>Mesa: <strong><%= pedido.mesa_numero %></strong></div>
-        <div>Mesero: <strong><%= pedido.mesero_nombre || 'Sin asignar' %></strong></div>
-        <div>Hora: <%= new Date().toLocaleString('es-CO') %></div>
+    <!-- ===== TICKET COMANDA ===== -->
+
+    <div class="negocio-nombre"><%= config.nombre_negocio || 'RESTAURANTE' %></div>
+
+    <hr class="divider">
+
+    <!-- Mesa y mesero -->
+    <div class="mesa-wrap">
+        <div>
+            <div class="mesa-label">Mesa</div>
+            <div class="mesa-num">#<%= pedido.mesa_numero %></div>
+        </div>
+        <div style="text-align:right;">
+            <div class="mesa-label">Mesero</div>
+            <div class="bold"><%= pedido.mesero_nombre || 'Sin asignar' %></div>
+        </div>
     </div>
 
-    <div class="divider"></div>
-    <div><strong>COMANDA</strong></div>
-    <div class="divider"></div>
+    <div class="small muted center">
+        Pedido #<%= pedido.id %>
+        &nbsp;|&nbsp;
+        <%= new Date().toLocaleString('es-CO', { hour12: false, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) %>
+    </div>
 
+    <hr class="divider">
+
+    <div class="titulo-comanda">*** COMANDA ***</div>
+
+    <hr class="divider">
+
+    <!-- Items del pedido -->
     <% if (!items || items.length === 0) { %>
-        <div class="muted">Sin ítems para imprimir.</div>
+        <div class="muted center" style="padding:4mm 0;">
+            Sin ítems para imprimir.
+        </div>
     <% } else { %>
         <% items.forEach(function(it){ %>
             <div class="linea">
-                <div><strong>x<%= Number(it.cantidad || 0) %></strong> - <%= it.producto_nombre %></div>
-                <% if (it.nota) { %>
-                    <div class="nota">Obs: <%= it.nota %></div>
-                <% } %>
+                <div class="linea-qty"><%= Number(it.cantidad || 0) %></div>
+                <div class="linea-info">
+                    <div class="linea-nombre"><%= it.producto_nombre %></div>
+                    <% if (String(it.nota || '').trim()) { %>
+                        <div class="nota">&#9888; <%= it.nota %></div>
+                    <% } %>
+                </div>
             </div>
         <% }) %>
     <% } %>
 
-    <div class="divider"></div>
-    <div class="muted center">Pedido #<%= pedido.id %></div>
+    <hr class="divider">
 
+    <div class="center small muted">--- Fin de comanda ---</div>
+
+    <!-- Auto-print si viene con parámetro auto_print=1 -->
     <% if (typeof auto_print !== 'undefined' && auto_print) { %>
-        <script>
-            window.addEventListener('load', function(){
-                try { window.print(); } catch (_) {}
-            });
-        </script>
+    <script>
+        window.addEventListener('load', function () {
+            try { window.print(); } catch (_) {}
+        });
+    </script>
     <% } %>
+
 </body>
 </html>

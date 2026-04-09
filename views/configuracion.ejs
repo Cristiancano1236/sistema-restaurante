@@ -3,273 +3,595 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configuración de Impresión</title>
+    <title>Configuración del Sistema</title>
     <link href="/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
     <style>
         html, body { height: 100%; }
-        body { min-height: 100vh; display: flex; flex-direction: column; }
-        body{background-color:#f8f9fa}
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: #f0f2f5;
+        }
+
+        /* Tarjetas de estado superiores */
+        .estado-card { border-left: 4px solid; border-radius: 8px; }
+        .estado-card.ok      { border-color: #198754; }
+        .estado-card.info    { border-color: #0d6efd; }
+        .estado-card.warning { border-color: #ffc107; }
+        .estado-card.muted   { border-color: #adb5bd; }
+
+        /* Tabs con fondo blanco */
+        .nav-tabs .nav-link {
+            color: #495057;
+            font-weight: 500;
+            border-radius: 8px 8px 0 0;
+        }
+        .nav-tabs .nav-link.active {
+            background: #fff;
+            color: #0d6efd;
+            border-color: #dee2e6 #dee2e6 #fff;
+        }
+        .tab-content {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-top: none;
+            border-radius: 0 8px 8px 8px;
+            padding: 24px;
+        }
+
+        /* Selector visual de modo de impresión */
+        .modo-option {
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all .2s;
+            background: #fff;
+            height: 100%;
+        }
+        .modo-option:hover              { border-color: #86b7fe; background: #f0f7ff; }
+        .modo-option.activo-servidor    { border-color: #0d6efd; background: #e7f0ff; }
+        .modo-option.activo-navegador   { border-color: #198754; background: #e9f7ef; }
+        .modo-icon { font-size: 2em; margin-bottom: 6px; }
+
+        /* Tooltip icon */
+        .help-icon { color: #6c757d; cursor: help; font-size: 0.9em; }
+
+        /* Sticky save bar */
+        .save-bar {
+            position: sticky;
+            bottom: 0;
+            background: rgba(255,255,255,0.97);
+            border-top: 1px solid #dee2e6;
+            padding: 12px 0;
+            margin: 24px -24px -24px -24px;
+            padding-left: 24px;
+            padding-right: 24px;
+            border-radius: 0 0 8px 8px;
+            z-index: 10;
+            backdrop-filter: blur(4px);
+        }
     </style>
 </head>
 <body>
     <%- include('partials/navbar') %>
     <main class="flex-grow-1">
-    <div class="container mt-4">
-        <h2 class="mb-4">Configuración de Factura</h2>
-        
-        <form action="/configuracion" method="POST" enctype="multipart/form-data">
-            <div class="card mb-4">
-                <div class="card-header">
-                    Datos del Negocio
-                </div>
-                <div class="card-body">
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Nombre del Negocio</label>
-                            <input type="text" class="form-control" name="nombre_negocio" value="<%= config.nombre_negocio || '' %>" required>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">NIT/RUT</label>
-                            <input type="text" class="form-control" name="nit" value="<%= config.nit || '' %>">
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Dirección</label>
-                            <input type="text" class="form-control" name="direccion" value="<%= config.direccion || '' %>">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Teléfono</label>
-                            <input type="text" class="form-control" name="telefono" value="<%= config.telefono || '' %>">
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Logo del Negocio</label>
-                            <!-- Input de logo: guarda en configuracion_impresion.logo_data/logo_tipo (routes/configuracion.js) -->
-                            <input id="inputLogo" type="file" class="form-control" name="logo" accept="image/*">
+    <div class="container-lg mt-4 pb-5">
 
-                            <!-- Estado + previsualización (si ya existe en BD o si el usuario selecciona uno nuevo) -->
+        <!-- ===== ENCABEZADO ===== -->
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+                <h2 class="mb-0"><i class="bi bi-gear-fill me-2 text-primary"></i>Configuración</h2>
+                <p class="text-muted mb-0 small mt-1">Negocio · Impresión · Red</p>
+            </div>
+            <a href="/" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left me-1"></i>Volver
+            </a>
+        </div>
+
+        <!-- ===== TARJETAS DE ESTADO (resumen rápido) ===== -->
+        <!-- Bug fix: usar condicionales sin HTML embebido en <%= %> -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-xl-3">
+                <div class="card estado-card h-100 border-0 shadow-sm <%= Number(config.cocina_imprime_servidor || 0) === 1 ? 'info' : 'ok' %>">
+                    <div class="card-body py-3">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <i class="bi bi-receipt fs-5 text-primary"></i>
+                            <span class="fw-semibold small">Comanda</span>
+                        </div>
+                        <% if (Number(config.cocina_imprime_servidor || 0) === 1) { %>
+                            <span class="badge bg-primary"><i class="bi bi-pc-display me-1"></i>Servidor</span>
+                        <% } else { %>
+                            <span class="badge bg-success"><i class="bi bi-phone me-1"></i>Navegador</span>
+                        <% } %>
+                        <div class="small text-muted mt-1">
+                            <% if (config.impresora_comandas) { %>
+                                <i class="bi bi-printer me-1"></i><%= config.impresora_comandas %>
+                            <% } else { %>
+                                <i class="bi bi-dash-circle me-1"></i><em>No configurada</em>
+                            <% } %>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="card estado-card h-100 border-0 shadow-sm <%= Number(config.factura_imprime_servidor || 0) === 1 ? 'info' : 'ok' %>">
+                    <div class="card-body py-3">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <i class="bi bi-file-earmark-text fs-5 text-success"></i>
+                            <span class="fw-semibold small">Factura</span>
+                        </div>
+                        <% if (Number(config.factura_imprime_servidor || 0) === 1) { %>
+                            <span class="badge bg-primary"><i class="bi bi-pc-display me-1"></i>Servidor</span>
+                        <% } else { %>
+                            <span class="badge bg-success"><i class="bi bi-phone me-1"></i>Navegador</span>
+                        <% } %>
+                        <div class="small text-muted mt-1">
+                            <% if (config.impresora_facturas) { %>
+                                <i class="bi bi-printer me-1"></i><%= config.impresora_facturas %>
+                            <% } else { %>
+                                <i class="bi bi-dash-circle me-1"></i><em>No configurada</em>
+                            <% } %>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="card estado-card h-100 border-0 shadow-sm <%= config.nombre_negocio ? 'ok' : 'warning' %>">
+                    <div class="card-body py-3">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <i class="bi bi-shop fs-5 text-warning"></i>
+                            <span class="fw-semibold small">Negocio</span>
+                        </div>
+                        <div class="small fw-semibold"><%= config.nombre_negocio || 'Sin nombre' %></div>
+                        <div class="small text-muted"><%= config.telefono || 'Sin teléfono' %></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="card estado-card h-100 border-0 shadow-sm muted">
+                    <div class="card-body py-3">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <i class="bi bi-image fs-5 text-secondary"></i>
+                            <span class="fw-semibold small">Recursos</span>
+                        </div>
+                        <span class="badge <%= config.logo_src ? 'bg-success' : 'bg-secondary' %> me-1">
+                            <i class="bi bi-<%= config.logo_src ? 'check' : 'x' %>"></i> Logo
+                        </span>
+                        <span class="badge <%= config.qr_src ? 'bg-success' : 'bg-secondary' %>">
+                            <i class="bi bi-<%= config.qr_src ? 'check' : 'x' %>"></i> QR
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TABS ===== -->
+        <ul class="nav nav-tabs" id="cfgTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-negocio-btn" data-bs-toggle="tab"
+                        data-bs-target="#tab-negocio" type="button" role="tab">
+                    <i class="bi bi-shop me-1"></i>Negocio
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-impresion-btn" data-bs-toggle="tab"
+                        data-bs-target="#tab-impresion" type="button" role="tab">
+                    <i class="bi bi-printer me-1"></i>Impresión
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-red-btn" data-bs-toggle="tab"
+                        data-bs-target="#tab-red" type="button" role="tab">
+                    <i class="bi bi-wifi me-1"></i>Red y Dispositivos
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="cfgTabsContent">
+
+            <!-- ================================================
+                 PESTAÑA 1: NEGOCIO
+                 ================================================ -->
+            <div class="tab-pane fade show active" id="tab-negocio" role="tabpanel">
+                <form action="/configuracion" method="POST" enctype="multipart/form-data" id="formNegocio">
+
+                    <!-- Campos ocultos para que el POST incluya los valores de las otras secciones -->
+                    <!-- Sin esto, al guardar desde esta pestaña se borrarían los valores de Impresión -->
+                    <input type="hidden" name="_tab" value="negocio">
+
+                    <h5 class="mb-4 text-muted fw-normal">
+                        <i class="bi bi-shop me-1"></i>Información que aparece en facturas y comandas
+                    </h5>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6 mb-3 mb-md-0">
+                            <label class="form-label fw-semibold">Nombre del Negocio <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="nombre_negocio"
+                                   value="<%= config.nombre_negocio || '' %>" required
+                                   placeholder="Ej: Restaurante El Sabor">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">NIT / RUT</label>
+                            <input type="text" class="form-control" name="nit"
+                                   value="<%= config.nit || '' %>"
+                                   placeholder="Ej: 900.123.456-7">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6 mb-3 mb-md-0">
+                            <label class="form-label fw-semibold">Dirección</label>
+                            <input type="text" class="form-control" name="direccion"
+                                   value="<%= config.direccion || '' %>"
+                                   placeholder="Calle 123 # 45-67">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Teléfono</label>
+                            <input type="text" class="form-control" name="telefono"
+                                   value="<%= config.telefono || '' %>"
+                                   placeholder="300 000 0000">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6 mb-3 mb-md-0">
+                            <label class="form-label fw-semibold">Pie de Página</label>
+                            <textarea class="form-control" name="pie_pagina" rows="2"
+                                      placeholder="¡Gracias por su visita!"><%= config.pie_pagina || '' %></textarea>
+                            <div class="form-text">Aparece al final de cada factura.</div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+                    <h6 class="fw-semibold mb-3">Imágenes</h6>
+
+                    <div class="row g-4 mb-3">
+                        <!-- Logo -->
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Logo del Negocio</label>
+                            <input id="inputLogo" type="file" class="form-control" name="logo" accept="image/*">
                             <div class="mt-2">
                                 <% if (config.logo_src) { %>
-                                    <div class="small text-success mb-1">
+                                    <div class="small text-success mb-2">
                                         <i class="bi bi-check-circle me-1"></i>Logo guardado actualmente
                                     </div>
                                 <% } else { %>
-                                    <div class="small text-muted mb-1">
-                                        <i class="bi bi-info-circle me-1"></i>No hay logo guardado
+                                    <div class="small text-muted mb-2">
+                                        <i class="bi bi-info-circle me-1"></i>Sin logo guardado
                                     </div>
                                 <% } %>
-
-                                <img
-                                    id="previewLogo"
-                                    src="<%= config.logo_src || '' %>"
-                                    alt="Previsualización de Logo"
-                                    class="border rounded p-1 bg-white"
-                                    style="max-width: 200px; display: <%= config.logo_src ? 'block' : 'none' %>;"
-                                >
+                                <img id="previewLogo"
+                                     src="<%= config.logo_src || '' %>"
+                                     alt="Logo"
+                                     class="border rounded p-1 bg-white"
+                                     style="max-width:180px; display:<%= config.logo_src ? 'block' : 'none' %>;">
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">QR para Transferencias</label>
-                            <!-- Input de QR: guarda en configuracion_impresion.qr_data/qr_tipo (routes/configuracion.js) -->
-                            <input id="inputQr" type="file" class="form-control" name="qr" accept="image/*">
 
-                            <!-- Estado + previsualización -->
+                        <!-- QR -->
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">
+                                QR para Transferencias
+                                <i class="bi bi-question-circle help-icon ms-1"
+                                   data-bs-toggle="tooltip"
+                                   title="Imagen QR que aparece al final de la factura para pagos digitales"></i>
+                            </label>
+                            <input id="inputQr" type="file" class="form-control" name="qr" accept="image/*">
                             <div class="mt-2">
                                 <% if (config.qr_src) { %>
-                                    <div class="small text-success mb-1">
+                                    <div class="small text-success mb-2">
                                         <i class="bi bi-check-circle me-1"></i>QR guardado actualmente
                                     </div>
                                 <% } else { %>
-                                    <div class="small text-muted mb-1">
-                                        <i class="bi bi-info-circle me-1"></i>No hay QR guardado
+                                    <div class="small text-muted mb-2">
+                                        <i class="bi bi-info-circle me-1"></i>Sin QR guardado
                                     </div>
                                 <% } %>
-
-                                <img
-                                    id="previewQr"
-                                    src="<%= config.qr_src || '' %>"
-                                    alt="Previsualización de QR"
-                                    class="border rounded p-1 bg-white"
-                                    style="max-width: 150px; display: <%= config.qr_src ? 'block' : 'none' %>;"
-                                >
+                                <img id="previewQr"
+                                     src="<%= config.qr_src || '' %>"
+                                     alt="QR"
+                                     class="border rounded p-1 bg-white"
+                                     style="max-width:130px; display:<%= config.qr_src ? 'block' : 'none' %>;">
                             </div>
                         </div>
                     </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Pie de Página</label>
-                            <textarea class="form-control" name="pie_pagina" rows="3"><%= config.pie_pagina || '' %></textarea>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            <div class="card mb-4">
-                <div class="card-header">
-                    Formato de Impresión
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <label class="form-label">Ancho del Papel (mm)</label>
-                            <input type="number" class="form-control" name="ancho_papel" value="<%= config.ancho_papel || 80 %>" min="58" max="80">
-                            <small class="text-muted">Recomendado: 80mm para facturas estándar</small>
+                    <!-- Campos ocultos: valores de Impresión para que no se pierdan -->
+                    <input type="hidden" name="ancho_papel"               value="<%= config.ancho_papel || 80 %>">
+                    <input type="hidden" name="font_size"                 value="<%= config.font_size || 1 %>">
+                    <input type="hidden" name="cocina_auto_listo_comanda" value="<%= Number(config.cocina_auto_listo_comanda || 0) %>">
+                    <input type="hidden" name="cocina_imprime_servidor"   value="<%= Number(config.cocina_imprime_servidor || 0) %>">
+                    <input type="hidden" name="impresora_comandas"        value="<%= config.impresora_comandas || '' %>">
+                    <input type="hidden" name="impresora_facturas"        value="<%= config.impresora_facturas || '' %>">
+                    <input type="hidden" name="factura_imprime_servidor"  value="<%= Number(config.factura_imprime_servidor || 0) %>">
+                    <input type="hidden" name="factura_copias"            value="<%= Number(config.factura_copias || 1) %>">
+                    <input type="hidden" name="factura_auto_print"        value="<%= Number(config.factura_auto_print || 0) %>">
+
+                    <div class="save-bar d-flex align-items-center gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-floppy me-1"></i>Guardar datos del negocio
+                        </button>
+                        <span class="text-muted small">Los cambios aplican en facturas y comandas nuevas.</span>
+                    </div>
+                </form>
+            </div><!-- /tab-negocio -->
+
+
+            <!-- ================================================
+                 PESTAÑA 2: IMPRESIÓN
+                 ================================================ -->
+            <div class="tab-pane fade" id="tab-impresion" role="tabpanel">
+                <form action="/configuracion" method="POST" enctype="multipart/form-data" id="formImpresion">
+                    <input type="hidden" name="_tab" value="impresion">
+
+                    <!-- ---- PAPEL ---- -->
+                    <h5 class="mb-3 text-muted fw-normal">
+                        <i class="bi bi-file-ruled me-1"></i>Formato del rollo de papel
+                    </h5>
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Ancho del Papel</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="ancho_papel"
+                                       value="<%= config.ancho_papel || 80 %>" min="58" max="80">
+                                <span class="input-group-text">mm</span>
+                            </div>
+                            <div class="form-text">
+                                58mm = pequeño &nbsp;·&nbsp; <strong>80mm</strong> = estándar POS
+                            </div>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Tamaño de Fuente</label>
-                            <select class="form-control" name="font_size">
-                                <option value="1" <%= (config.font_size || 1) == 1 ? 'selected' : '' %>>Normal</option>
-                                <option value="2" <%= (config.font_size || 1) == 2 ? 'selected' : '' %>>Grande</option>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Tamaño de Fuente</label>
+                            <select class="form-select" name="font_size">
+                                <option value="1" <%= (config.font_size || 1) == 1 ? 'selected' : '' %>>Normal (8.5 pt)</option>
+                                <option value="2" <%= (config.font_size || 1) == 2 ? 'selected' : '' %>>Grande (10 pt)</option>
                             </select>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    Flujo de Cocina
-                </div>
-                <div class="card-body">
-                    <div class="form-check form-switch">
-                        <input
-                            class="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            id="cfgCocinaAutoListoComanda"
-                            name="cocina_auto_listo_comanda"
-                            value="1"
-                            <%= Number(config.cocina_auto_listo_comanda || 0) === 1 ? 'checked' : '' %>
-                        >
-                        <label class="form-check-label" for="cfgCocinaAutoListoComanda">
-                            Cocina sin dispositivo: imprimir comanda al enviar y pasar directo a <strong>Listo</strong>
-                        </label>
-                    </div>
-                    <div class="small text-muted mt-2">
-                        Útil cuando la cocina no usa pantalla. El mesero envía, se imprime la comanda y luego entrega desde la pestaña de listos.
-                    </div>
-                    <div class="form-check form-switch mt-2">
-                        <input
-                            class="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            id="cfgCocinaImprimeServidor"
-                            name="cocina_imprime_servidor"
-                            value="1"
-                            <%= Number(config.cocina_imprime_servidor || 0) === 1 ? 'checked' : '' %>
-                        >
-                        <label class="form-check-label" for="cfgCocinaImprimeServidor">
-                            Imprimir comanda en servidor (PC) cuando el envío se hace desde celular/tablet
-                        </label>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="alert alert-info py-2 px-3 mb-0 small w-100">
+                                <i class="bi bi-lightbulb me-1"></i>
+                                Si ves URL o número de página en el ticket, ve a <em>Más opciones de impresión</em>
+                                en el navegador y desactiva los <strong>Encabezados y pies</strong>.
+                            </div>
+                        </div>
                     </div>
 
-                    <hr>
+                    <hr class="my-4">
 
-                    <div class="row g-3">
+                    <!-- ---- COMANDA ---- -->
+                    <h5 class="mb-1 text-muted fw-normal">
+                        <i class="bi bi-receipt me-1"></i>Comanda (cocina)
+                    </h5>
+                    <p class="text-muted small mb-3">Configuración del ticket que va a la cocina al enviar un pedido.</p>
+
+                    <div class="row g-3 mb-3">
+                        <!-- Switches de comanda -->
                         <div class="col-md-6">
-                            <label class="form-label">Impresora predeterminada de comandas</label>
-                            <select class="form-select" id="impresoraComandas" name="impresora_comandas" data-selected="<%= config.impresora_comandas || '' %>">
-                                <option value="">(Seleccionar impresora)</option>
-                            </select>
-                            <div class="form-text">Se usa como preferencia para comandas.</div>
-                            <div class="mt-2">
-                                <button type="button" id="btnImprimirComandaPrueba" class="btn btn-outline-primary btn-sm">
-                                    <i class="bi bi-printer me-1"></i>Imprimir comanda de prueba (servidor)
-                                </button>
+                            <div class="card border h-100">
+                                <div class="card-body">
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="cfgCocinaAutoListoComanda"
+                                               name="cocina_auto_listo_comanda" value="1"
+                                               <%= Number(config.cocina_auto_listo_comanda || 0) === 1 ? 'checked' : '' %>>
+                                        <label class="form-check-label fw-semibold" for="cfgCocinaAutoListoComanda">
+                                            Cocina sin pantalla
+                                        </label>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        Al enviar un pedido, imprime la comanda y marca los ítems como
+                                        <strong>Listo</strong> automáticamente. Ideal cuando la cocina no usa una pantalla.
+                                    </p>
+                                </div>
                             </div>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Impresora predeterminada de facturas</label>
-                            <select class="form-select" id="impresoraFacturas" name="impresora_facturas" data-selected="<%= config.impresora_facturas || '' %>">
-                                <option value="">(Seleccionar impresora)</option>
-                            </select>
-                            <div class="form-text">Se usa como preferencia para facturas.</div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Copias de factura</label>
-                            <input type="number" min="1" max="5" class="form-control" name="factura_copias" value="<%= Number(config.factura_copias || 1) %>">
-                        </div>
-                        <div class="col-md-9 d-flex align-items-end">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" role="switch" id="cfgFacturaAutoPrint" name="factura_auto_print" value="1" <%= Number(config.factura_auto_print || 0) === 1 ? 'checked' : '' %>>
-                                <label class="form-check-label" for="cfgFacturaAutoPrint">Impresión automática de factura al abrir vista de impresión</label>
-                            </div>
-                        </div>
-                        <div class="col-md-12">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" role="switch" id="cfgFacturaImprimeServidor" name="factura_imprime_servidor" value="1" <%= Number(config.factura_imprime_servidor || 0) === 1 ? 'checked' : '' %>>
-                                <label class="form-check-label" for="cfgFacturaImprimeServidor">Imprimir factura en servidor (PC) y no depender del navegador del dispositivo</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="alert alert-warning mt-3 py-2 px-3 small mb-0">
-                        En entorno web, el navegador puede solicitar confirmación y no permite forzar impresora al 100%.
-                    </div>
-                    <div class="alert alert-info mt-2 py-2 px-3 small mb-0">
-                        Si en el ticket aparece URL/encabezado (ej. <code>localhost...</code>), eso es del navegador (headers/footers de impresión), no de la impresora térmica.
-                    </div>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-wifi me-1"></i>Vincular dispositivos (Red local)</span>
-                    <span class="badge text-bg-secondary">Administrador</span>
-                </div>
-                <div class="card-body">
-                    <div class="alert alert-info py-2 px-3 small">
-                        Genera un QR con la URL/IP donde está corriendo el sistema para abrirlo rápidamente desde celulares o tablets de la misma red.
-                    </div>
-
-                    <div class="row g-3">
-                        <div class="col-12 col-lg-7">
-                            <label class="form-label">URL de conexión</label>
-                            <!-- Select de URLs detectadas por backend -->
-                            <!-- Relacionado con: routes/configuracion.js (GET /configuracion/conexion-info) -->
-                            <select id="connUrlSelect" class="form-select mb-2"></select>
-                            <div class="d-flex gap-2 flex-wrap">
-                                <button type="button" id="btnRefrescarConexion" class="btn btn-outline-primary btn-sm">
-                                    <i class="bi bi-arrow-clockwise me-1"></i>Actualizar URLs y QR
-                                </button>
-                                <button type="button" id="btnCopiarUrl" class="btn btn-outline-secondary btn-sm">
-                                    <i class="bi bi-clipboard me-1"></i>Copiar URL
-                                </button>
-                                <button type="button" id="btnDiagnosticarConexion" class="btn btn-outline-danger btn-sm">
-                                    <i class="bi bi-activity me-1"></i>Diagnosticar conexión
-                                </button>
-                            </div>
-                            <div id="connMetaInfo" class="small text-muted mt-2"></div>
-                        </div>
-                        <div class="col-12 col-lg-5">
-                            <div class="border rounded p-2 bg-white text-center">
-                                <div class="small text-muted mb-2">QR de conexión</div>
-                                <img id="connQrImage" alt="QR de conexión" style="max-width: 280px; width: 100%; display: none;">
-                                <div id="connQrEmpty" class="small text-muted py-4">
-                                    <i class="bi bi-qr-code fs-3 d-block mb-1"></i>
-                                    Aún no se ha generado el QR
+                            <div class="card border h-100">
+                                <div class="card-body">
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="cfgCocinaImprimeServidor"
+                                               name="cocina_imprime_servidor" value="1"
+                                               <%= Number(config.cocina_imprime_servidor || 0) === 1 ? 'checked' : '' %>>
+                                        <label class="form-check-label fw-semibold" for="cfgCocinaImprimeServidor">
+                                            Imprimir en servidor (PC)
+                                        </label>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        Cuando el mesero toma el pedido desde un celular/tablet, la PC imprime la comanda
+                                        directamente. <strong>La impresora debe estar conectada a la PC.</strong>
+                                    </p>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div id="diagnosticoWrap" class="mt-3 d-none">
-                        <h6 class="mb-2"><i class="bi bi-stethoscope me-1"></i>Resultado del diagnóstico</h6>
-                        <div id="diagnosticoEstado" class="mb-2"></div>
-                        <div id="diagnosticoCausas" class="mb-2"></div>
-                        <div id="diagnosticoRecomendaciones"></div>
+                    <!-- Selector de impresora de comanda -->
+                    <div class="row g-3 mb-2 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-printer me-1"></i>Impresora de comandas
+                            </label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-printer"></i></span>
+                                <select class="form-select" id="impresoraComandas" name="impresora_comandas"
+                                        data-selected="<%= config.impresora_comandas || '' %>">
+                                    <option value="">Cargando...</option>
+                                </select>
+                            </div>
+                            <div id="estadoImpresoraComandas" class="small mt-1"></div>
+                        </div>
+                        <div class="col-md-6 d-flex gap-2 flex-wrap">
+                            <button type="button" id="btnImprimirComandaPrueba"
+                                    class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-printer me-1"></i>Prueba en PC (servidor)
+                            </button>
+                            <a href="/api/mesas/pedidos/1/comanda?auto_print=0" target="_blank"
+                               class="btn btn-outline-success btn-sm">
+                                <i class="bi bi-eye me-1"></i>Ver formato en pantalla
+                            </a>
+                        </div>
+                    </div>
+                    <div id="resultadoTestComanda" class="mb-3" style="display:none;"></div>
+
+                    <hr class="my-4">
+
+                    <!-- ---- FACTURA ---- -->
+                    <h5 class="mb-1 text-muted fw-normal">
+                        <i class="bi bi-file-earmark-text me-1"></i>Factura
+                    </h5>
+                    <p class="text-muted small mb-3">Configuración del ticket de cobro que recibe el cliente.</p>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <div class="card border h-100">
+                                <div class="card-body">
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="cfgFacturaImprimeServidor"
+                                               name="factura_imprime_servidor" value="1"
+                                               <%= Number(config.factura_imprime_servidor || 0) === 1 ? 'checked' : '' %>>
+                                        <label class="form-check-label fw-semibold" for="cfgFacturaImprimeServidor">
+                                            Imprimir en servidor (PC)
+                                        </label>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        La factura se imprime directamente en la PC sin abrir ventana en el navegador.
+                                        <strong>La impresora debe estar conectada a la PC.</strong>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card border h-100">
+                                <div class="card-body">
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               id="cfgFacturaAutoPrint"
+                                               name="factura_auto_print" value="1"
+                                               <%= Number(config.factura_auto_print || 0) === 1 ? 'checked' : '' %>>
+                                        <label class="form-check-label fw-semibold" for="cfgFacturaAutoPrint">
+                                            Impresión automática
+                                        </label>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        Al abrir la vista de la factura, se dispara <code>window.print()</code>
+                                        automáticamente. Solo aplica en <em>Modo Navegador</em>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Impresora factura + copias -->
+                    <div class="row g-3 mb-2 align-items-end">
+                        <div class="col-md-5">
+                            <label class="form-label fw-semibold">
+                                <i class="bi bi-printer me-1"></i>Impresora de facturas
+                            </label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-printer"></i></span>
+                                <select class="form-select" id="impresoraFacturas" name="impresora_facturas"
+                                        data-selected="<%= config.impresora_facturas || '' %>">
+                                    <option value="">Cargando...</option>
+                                </select>
+                            </div>
+                            <div id="estadoImpresoraFacturas" class="small mt-1"></div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label fw-semibold">Copias</label>
+                            <input type="number" min="1" max="5" class="form-control"
+                                   name="factura_copias"
+                                   value="<%= Number(config.factura_copias || 1) %>">
+                        </div>
+                    </div>
+
+                    <div class="alert alert-warning py-2 px-3 small mt-3 mb-0">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        <strong>Modo Navegador:</strong> El diálogo del sistema puede pedir confirmación.
+                        Si el ticket muestra URL o número de página, desactiva los
+                        <em>Encabezados y pies de página</em> en las opciones de impresión del navegador.
+                    </div>
+
+                    <!-- Campos ocultos: valores de Negocio para que no se pierdan al guardar desde esta pestaña -->
+                    <input type="hidden" name="nombre_negocio" value="<%= config.nombre_negocio || '' %>">
+                    <input type="hidden" name="nit"            value="<%= config.nit || '' %>">
+                    <input type="hidden" name="direccion"      value="<%= config.direccion || '' %>">
+                    <input type="hidden" name="telefono"       value="<%= config.telefono || '' %>">
+                    <input type="hidden" name="pie_pagina"     value="<%= config.pie_pagina || '' %>">
+
+                    <div class="save-bar d-flex align-items-center gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-floppy me-1"></i>Guardar configuración de impresión
+                        </button>
+                        <span id="msgGuardadoImpresion" class="text-success small" style="display:none;">
+                            <i class="bi bi-check-circle me-1"></i>¡Guardado!
+                        </span>
+                    </div>
+                </form>
+            </div><!-- /tab-impresion -->
+
+
+            <!-- ================================================
+                 PESTAÑA 3: RED Y DISPOSITIVOS
+                 ================================================ -->
+            <div class="tab-pane fade" id="tab-red" role="tabpanel">
+
+                <h5 class="mb-1 text-muted fw-normal">
+                    <i class="bi bi-wifi me-1"></i>Conectar dispositivos a la misma red
+                </h5>
+                <p class="text-muted small mb-4">
+                    Genera un código QR con la URL del sistema para abrirlo desde celulares o tablets
+                    que estén conectados a la misma red WiFi.
+                </p>
+
+                <div class="row g-4">
+                    <div class="col-12 col-lg-7">
+                        <label class="form-label fw-semibold">URL de conexión detectada</label>
+                        <select id="connUrlSelect" class="form-select mb-3"></select>
+
+                        <div class="d-flex gap-2 flex-wrap mb-3">
+                            <button type="button" id="btnRefrescarConexion" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar URLs y QR
+                            </button>
+                            <button type="button" id="btnCopiarUrl" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-clipboard me-1"></i>Copiar URL
+                            </button>
+                            <button type="button" id="btnDiagnosticarConexion" class="btn btn-outline-danger btn-sm">
+                                <i class="bi bi-activity me-1"></i>Diagnosticar conexión
+                            </button>
+                        </div>
+                        <div id="connMetaInfo" class="small text-muted"></div>
+
+                        <div id="diagnosticoWrap" class="mt-3 d-none">
+                            <h6 class="mb-2"><i class="bi bi-stethoscope me-1"></i>Resultado del diagnóstico</h6>
+                            <div id="diagnosticoEstado" class="mb-2"></div>
+                            <div id="diagnosticoCausas" class="mb-2"></div>
+                            <div id="diagnosticoRecomendaciones"></div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-5">
+                        <div class="border rounded p-3 bg-light text-center">
+                            <div class="small text-muted mb-2">
+                                <i class="bi bi-qr-code me-1"></i>QR de conexión
+                            </div>
+                            <img id="connQrImage" alt="QR de conexión"
+                                 style="max-width:240px; width:100%; display:none;">
+                            <div id="connQrEmpty" class="text-muted py-3 small">
+                                <i class="bi bi-qr-code fs-2 d-block mb-2"></i>
+                                Haz clic en <em>Actualizar URLs y QR</em>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </div><!-- /tab-red -->
 
-            <div class="d-flex gap-2">
-                <button type="submit" class="btn btn-primary">Guardar Configuración</button>
-                <a href="/" class="btn btn-secondary">Volver</a>
-            </div>
-        </form>
-    </div>
+        </div><!-- /tab-content -->
+    </div><!-- /container -->
     </main>
 
     <%- include('partials/footer') %>
@@ -277,244 +599,330 @@
     <script src="/vendor/jquery/jquery.min.js"></script>
     <script src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Previsualización inmediata de imágenes antes de guardar
-        // Relacionado con: inputs #inputLogo y #inputQr en esta vista
-        (function initPrevisualizadores() {
-            function previewFile(inputEl, imgEl) {
-                if (!inputEl || !imgEl) return;
-                inputEl.addEventListener('change', function() {
-                    const file = inputEl.files && inputEl.files[0];
-                    if (!file) return;
-                    if (!file.type || !file.type.startsWith('image/')) return;
+    // ====================================================
+    // Tooltips
+    // ====================================================
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+        new bootstrap.Tooltip(el, { trigger: 'hover focus' });
+    });
 
-                    const url = URL.createObjectURL(file);
-                    imgEl.src = url;
-                    imgEl.style.display = 'block';
+    // ====================================================
+    // Restaurar pestaña activa tras guardar (via URL hash o query param)
+    // Relacionado con: POST /configuracion → redirect /configuracion
+    // ====================================================
+    (function restoreTab() {
+        var stored = sessionStorage.getItem('cfgTab');
+        if (stored) {
+            var btn = document.getElementById(stored);
+            if (btn) new bootstrap.Tab(btn).show();
+            sessionStorage.removeItem('cfgTab');
+        }
+    })();
 
-                    // Liberar el blob url cuando cargue (evita fugas de memoria)
-                    imgEl.onload = function() {
-                        try { URL.revokeObjectURL(url); } catch (_) {}
-                    };
-                });
-            }
+    // Guardar qué pestaña estaba activa antes de hacer submit
+    document.querySelectorAll('#cfgTabs .nav-link').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            sessionStorage.setItem('cfgTab', btn.id);
+        });
+    });
 
-            previewFile(document.getElementById('inputLogo'), document.getElementById('previewLogo'));
-            previewFile(document.getElementById('inputQr'), document.getElementById('previewQr'));
-        })();
+    // Guardar también al hacer submit de cada form
+    ['formNegocio', 'formImpresion'].forEach(function (id) {
+        var f = document.getElementById(id);
+        if (!f) return;
+        f.addEventListener('submit', function () {
+            var activeBtn = document.querySelector('#cfgTabs .nav-link.active');
+            if (activeBtn) sessionStorage.setItem('cfgTab', activeBtn.id);
+        });
+    });
 
-        // Apartado de conexión para vinculación rápida por QR
-        // Relacionado con: routes/configuracion.js (/conexion-info y /diagnostico)
-        (function initVinculacionDispositivos() {
-            const $select = document.getElementById('connUrlSelect');
-            const $btnRefresh = document.getElementById('btnRefrescarConexion');
-            const $btnCopy = document.getElementById('btnCopiarUrl');
-            const $btnDiag = document.getElementById('btnDiagnosticarConexion');
-            const $meta = document.getElementById('connMetaInfo');
-            const $qr = document.getElementById('connQrImage');
-            const $qrEmpty = document.getElementById('connQrEmpty');
-            const $diagWrap = document.getElementById('diagnosticoWrap');
-            const $diagEstado = document.getElementById('diagnosticoEstado');
-            const $diagCausas = document.getElementById('diagnosticoCausas');
-            const $diagRecs = document.getElementById('diagnosticoRecomendaciones');
-
-            function selectedUrl() {
-                return String($select && $select.value ? $select.value : '').trim();
-            }
-
-            function setDiagVisible(show) {
-                if (!$diagWrap) return;
-                $diagWrap.classList.toggle('d-none', !show);
-            }
-
-            function renderDiagList(container, title, items, badgeClass) {
-                if (!container) return;
-                const arr = Array.isArray(items) ? items : [];
-                if (arr.length === 0) {
-                    container.innerHTML = '';
-                    return;
-                }
-                const lis = arr.map((x) => `<li>${String(x)}</li>`).join('');
-                container.innerHTML = `
-                    <div class="card border-0 bg-light">
-                        <div class="card-body py-2 px-3">
-                            <div class="small mb-1"><span class="badge ${badgeClass}">${title}</span></div>
-                            <ul class="mb-0 small">${lis}</ul>
-                        </div>
-                    </div>
-                `;
-            }
-
-            function updateQr(src) {
-                const hasQr = !!src;
-                if ($qr) {
-                    $qr.src = hasQr ? src : '';
-                    $qr.style.display = hasQr ? 'block' : 'none';
-                }
-                if ($qrEmpty) $qrEmpty.style.display = hasQr ? 'none' : 'block';
-            }
-
-            async function loadConnectionInfo() {
-                if (!$select) return;
-                $select.innerHTML = '<option value="">Cargando...</option>';
-                try {
-                    const resp = await fetch('/configuracion/conexion-info');
-                    const data = await resp.json();
-                    if (!resp.ok) throw new Error(data.error || 'No se pudo obtener la información de conexión');
-
-                    const urls = Array.isArray(data.urls) ? data.urls : [];
-                    const preferred = String(data.preferred_url || '').trim();
-
-                    $select.innerHTML = '';
-                    if (urls.length === 0) {
-                        $select.innerHTML = '<option value="">No se detectaron URLs</option>';
-                    } else {
-                        urls.forEach((u) => {
-                            const opt = document.createElement('option');
-                            opt.value = u;
-                            opt.textContent = u;
-                            if (u === preferred) opt.selected = true;
-                            $select.appendChild(opt);
-                        });
-                    }
-
-                    updateQr(data.qr_data_url || null);
-                    if ($meta) {
-                        const ips = Array.isArray(data.ips_locales) ? data.ips_locales : [];
-                        $meta.textContent = `Host: ${data.host_header || '-'} · Puerto: ${data.puerto || '-'} · IPs LAN: ${ips.length ? ips.join(', ') : 'No detectadas'}`;
-                    }
-                    setDiagVisible(false);
-                } catch (e) {
-                    updateQr(null);
-                    if ($meta) $meta.textContent = `Error: ${String(e.message || e)}`;
-                }
-            }
-
-            async function copyUrl() {
-                const url = selectedUrl();
-                if (!url) return;
-                try {
-                    await navigator.clipboard.writeText(url);
-                    alert('URL copiada al portapapeles');
-                } catch (_) {
-                    // Fallback para navegadores/entornos sin clipboard
-                    const tmp = document.createElement('input');
-                    tmp.value = url;
-                    document.body.appendChild(tmp);
-                    tmp.select();
-                    try { document.execCommand('copy'); } catch (_) {}
-                    document.body.removeChild(tmp);
-                    alert('URL copiada');
-                }
-            }
-
-            async function diagnosticar() {
-                const target = selectedUrl();
-                if (!target) return;
-                setDiagVisible(true);
-                if ($diagEstado) $diagEstado.innerHTML = '<span class="badge text-bg-secondary">Diagnóstico en curso...</span>';
-                if ($diagCausas) $diagCausas.innerHTML = '';
-                if ($diagRecs) $diagRecs.innerHTML = '';
-
-                try {
-                    const resp = await fetch(`/configuracion/diagnostico?target_url=${encodeURIComponent(target)}`);
-                    const data = await resp.json();
-                    if (!resp.ok) throw new Error(data.error || 'No se pudo diagnosticar');
-
-                    const ok = !!(data.db_ok && data.server_http_ok);
-                    if ($diagEstado) {
-                        $diagEstado.innerHTML = ok
-                            ? `<span class="badge text-bg-success">Conexión base OK</span>`
-                            : `<span class="badge text-bg-danger">Se detectaron problemas de conexión</span>`;
-                    }
-
-                    renderDiagList($diagCausas, 'Posibles causas', data.posibles_causas, 'text-bg-warning');
-                    renderDiagList($diagRecs, 'Recomendaciones', data.recomendaciones, 'text-bg-primary');
-                } catch (e) {
-                    if ($diagEstado) $diagEstado.innerHTML = `<span class="badge text-bg-danger">Error: ${String(e.message || e)}</span>`;
-                }
-            }
-
-            if ($btnRefresh) $btnRefresh.addEventListener('click', loadConnectionInfo);
-            if ($btnCopy) $btnCopy.addEventListener('click', copyUrl);
-            if ($btnDiag) $btnDiag.addEventListener('click', diagnosticar);
-
-            // Carga inicial automática al abrir Configuración
-            loadConnectionInfo();
-        })();
-
-        // Cargar impresoras del sistema y preseleccionar configuración guardada
-        (function initImpresorasConfig() {
-            const selComandas = document.getElementById('impresoraComandas');
-            const selFacturas = document.getElementById('impresoraFacturas');
-            if (!selComandas || !selFacturas) return;
-
-            const selectedComandas = String(selComandas.dataset.selected || '').trim();
-            const selectedFacturas = String(selFacturas.dataset.selected || '').trim();
-
-            function fillSelect(selectEl, list, selected) {
-                const opts = Array.isArray(list) ? list : [];
-                const hasSelected = selected && opts.includes(selected);
-                selectEl.innerHTML = '';
-
-                const base = document.createElement('option');
-                base.value = '';
-                base.textContent = '(Seleccionar impresora)';
-                selectEl.appendChild(base);
-
-                if (!hasSelected && selected) {
-                    const extra = document.createElement('option');
-                    extra.value = selected;
-                    extra.textContent = `${selected} (guardada)`;
-                    extra.selected = true;
-                    selectEl.appendChild(extra);
-                }
-
-                opts.forEach((name) => {
-                    const s = String(name || '').trim();
-                    if (!s) return;
-                    const opt = document.createElement('option');
-                    opt.value = s;
-                    opt.textContent = s;
-                    if (s === selected) opt.selected = true;
-                    selectEl.appendChild(opt);
-                });
-            }
-
-            fetch('/configuracion/impresoras')
-                .then(r => r.json())
-                .then((list) => {
-                    fillSelect(selComandas, list, selectedComandas);
-                    fillSelect(selFacturas, list, selectedFacturas);
-                })
-                .catch(() => {
-                    fillSelect(selComandas, [], selectedComandas);
-                    fillSelect(selFacturas, [], selectedFacturas);
-                });
-        })();
-
-        (function initComandaPrueba() {
-            const btn = document.getElementById('btnImprimirComandaPrueba');
-            if (!btn) return;
-            btn.addEventListener('click', async function () {
-                const old = btn.innerHTML;
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Imprimiendo...';
-                try {
-                    const resp = await fetch('/configuracion/impresion/comanda-prueba', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    const data = await resp.json().catch(() => ({}));
-                    if (!resp.ok) throw new Error(data.error || 'No se pudo imprimir');
-                    alert(`Comanda de prueba enviada a impresora: ${data.impresora || 'predeterminada'}`);
-                } catch (e) {
-                    alert(String(e.message || e));
-                } finally {
-                    btn.disabled = false;
-                    btn.innerHTML = old;
-                }
+    // ====================================================
+    // Previsualización de logo y QR
+    // ====================================================
+    (function initPrevisualizadores() {
+        function previewFile(inputId, imgId) {
+            var inp = document.getElementById(inputId);
+            var img = document.getElementById(imgId);
+            if (!inp || !img) return;
+            inp.addEventListener('change', function () {
+                var file = inp.files && inp.files[0];
+                if (!file || !file.type.startsWith('image/')) return;
+                var url = URL.createObjectURL(file);
+                img.src = url;
+                img.style.display = 'block';
+                img.onload = function () { try { URL.revokeObjectURL(url); } catch (_) {} };
             });
-        })();
+        }
+        previewFile('inputLogo', 'previewLogo');
+        previewFile('inputQr',   'previewQr');
+    })();
+
+    // ====================================================
+    // Resaltar tarjeta de modo al cambiar switch
+    // ====================================================
+    (function initModoResalte() {
+        // Este bloque es solo visual, no hay tarjetas de modo en la nueva versión
+        // pero dejamos el listener por si se agregan en el futuro
+    })();
+
+    // ====================================================
+    // Cargar impresoras del sistema
+    // Relacionado con: routes/configuracion.js GET /impresoras
+    // ====================================================
+    (function initImpresoras() {
+        var selC  = document.getElementById('impresoraComandas');
+        var selF  = document.getElementById('impresoraFacturas');
+        var stC   = document.getElementById('estadoImpresoraComandas');
+        var stF   = document.getElementById('estadoImpresoraFacturas');
+        if (!selC || !selF) return;
+
+        var savedC = String(selC.dataset.selected || '').trim();
+        var savedF = String(selF.dataset.selected || '').trim();
+
+        function fillSelect(sel, list, saved, status) {
+            var opts     = Array.isArray(list) ? list : [];
+            var inList   = saved && opts.includes(saved);
+            sel.innerHTML = '';
+
+            var base = document.createElement('option');
+            base.value = '';
+            base.textContent = opts.length ? '(Predeterminada del sistema)' : '(Sin impresoras detectadas)';
+            sel.appendChild(base);
+
+            if (!inList && saved) {
+                var ext = document.createElement('option');
+                ext.value = saved;
+                ext.textContent = saved + ' (guardada — verificar)';
+                ext.selected = true;
+                sel.appendChild(ext);
+            }
+            opts.forEach(function (n) {
+                var s = String(n || '').trim();
+                if (!s) return;
+                var o = document.createElement('option');
+                o.value = s; o.textContent = s;
+                if (s === saved) o.selected = true;
+                sel.appendChild(o);
+            });
+
+            if (!status) return;
+            if (!opts.length) {
+                status.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-circle me-1"></i>No se detectaron impresoras en este equipo</span>';
+            } else if (saved && inList) {
+                status.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Disponible y configurada</span>';
+            } else if (saved && !inList) {
+                status.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Impresora guardada no encontrada en el sistema</span>';
+            } else {
+                status.innerHTML = '<span class="text-muted"><i class="bi bi-dash-circle me-1"></i>Sin impresora seleccionada (usa la predeterminada)</span>';
+            }
+        }
+
+        if (stC) stC.innerHTML = '<span class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Cargando...</span>';
+        if (stF) stF.innerHTML = '<span class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Cargando...</span>';
+
+        fetch('/configuracion/impresoras')
+            .then(function (r) { return r.json(); })
+            .then(function (list) {
+                fillSelect(selC, list, savedC, stC);
+                fillSelect(selF, list, savedF, stF);
+            })
+            .catch(function () {
+                fillSelect(selC, [], savedC, stC);
+                fillSelect(selF, [], savedF, stF);
+            });
+    })();
+
+    // ====================================================
+    // Prueba de impresión de comanda desde servidor
+    // Relacionado con: routes/configuracion.js POST /impresion/comanda-prueba
+    // ====================================================
+    (function initComandaPrueba() {
+        var btn = document.getElementById('btnImprimirComandaPrueba');
+        var res = document.getElementById('resultadoTestComanda');
+        if (!btn) return;
+        btn.addEventListener('click', async function () {
+            var old = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Imprimiendo...';
+            if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+            try {
+                var resp = await fetch('/configuracion/impresion/comanda-prueba', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }
+                });
+                var data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok) throw new Error(data.error || 'No se pudo imprimir');
+                if (res) {
+                    res.style.display = 'block';
+                    res.innerHTML = '<div class="alert alert-success py-2 px-3 small mb-0">'
+                        + '<i class="bi bi-check-circle me-1"></i>'
+                        + 'Enviado a: <strong>' + (data.impresora || 'predeterminada') + '</strong></div>';
+                }
+            } catch (e) {
+                if (res) {
+                    res.style.display = 'block';
+                    res.innerHTML = '<div class="alert alert-danger py-2 px-3 small mb-0">'
+                        + '<i class="bi bi-x-circle me-1"></i>' + String(e.message || e) + '</div>';
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = old;
+            }
+        });
+    })();
+
+    // ====================================================
+    // Sincronizar campos ocultos al cambiar los reales
+    // Cuando el usuario cambia un valor en Impresión, actualizar hidden de Negocio y viceversa
+    // Relacionado con: inputs ocultos _tab en cada form
+    // ====================================================
+    (function syncHiddenFields() {
+        // Cuando cambia ancho_papel en el form de Impresión, actualizar el hidden en Negocio
+        var anchoPapelReal = document.querySelector('#formImpresion [name="ancho_papel"]');
+        var anchoPapelHid  = document.querySelector('#formNegocio [name="ancho_papel"]');
+        if (anchoPapelReal && anchoPapelHid) {
+            anchoPapelReal.addEventListener('change', function () {
+                anchoPapelHid.value = anchoPapelReal.value;
+            });
+        }
+
+        // Cuando cambia impresora_comandas en el form de Impresión, actualizar hidden en Negocio
+        var selComandas = document.getElementById('impresoraComandas');
+        var hidComandas = document.querySelector('#formNegocio [name="impresora_comandas"]');
+        if (selComandas && hidComandas) {
+            selComandas.addEventListener('change', function () {
+                hidComandas.value = selComandas.value;
+            });
+        }
+
+        var selFacturas = document.getElementById('impresoraFacturas');
+        var hidFacturas = document.querySelector('#formNegocio [name="impresora_facturas"]');
+        if (selFacturas && hidFacturas) {
+            selFacturas.addEventListener('change', function () {
+                hidFacturas.value = selFacturas.value;
+            });
+        }
+
+        // Switches: cuando cambian en Impresión, actualizar hidden en Negocio
+        var switches = [
+            { real: 'cfgCocinaAutoListoComanda', hidName: 'cocina_auto_listo_comanda' },
+            { real: 'cfgCocinaImprimeServidor',  hidName: 'cocina_imprime_servidor'   },
+            { real: 'cfgFacturaImprimeServidor',  hidName: 'factura_imprime_servidor'  },
+            { real: 'cfgFacturaAutoPrint',        hidName: 'factura_auto_print'        },
+        ];
+        switches.forEach(function (s) {
+            var sw  = document.getElementById(s.real);
+            var hid = document.querySelector('#formNegocio [name="' + s.hidName + '"]');
+            if (!sw || !hid) return;
+            sw.addEventListener('change', function () {
+                hid.value = sw.checked ? 1 : 0;
+            });
+        });
+    })();
+
+    // ====================================================
+    // Red / Dispositivos
+    // Relacionado con: routes/configuracion.js (/conexion-info, /diagnostico)
+    // ====================================================
+    (function initRed() {
+        var $sel  = document.getElementById('connUrlSelect');
+        var $ref  = document.getElementById('btnRefrescarConexion');
+        var $cop  = document.getElementById('btnCopiarUrl');
+        var $dia  = document.getElementById('btnDiagnosticarConexion');
+        var $meta = document.getElementById('connMetaInfo');
+        var $qr   = document.getElementById('connQrImage');
+        var $qrE  = document.getElementById('connQrEmpty');
+        var $dW   = document.getElementById('diagnosticoWrap');
+        var $dE   = document.getElementById('diagnosticoEstado');
+        var $dC   = document.getElementById('diagnosticoCausas');
+        var $dR   = document.getElementById('diagnosticoRecomendaciones');
+
+        function selUrl() { return String($sel && $sel.value ? $sel.value : '').trim(); }
+        function setDiag(v) { if ($dW) $dW.classList.toggle('d-none', !v); }
+
+        function renderList(el, title, items, cls) {
+            if (!el) return;
+            var arr = Array.isArray(items) ? items : [];
+            if (!arr.length) { el.innerHTML = ''; return; }
+            el.innerHTML = '<div class="card border-0 bg-light"><div class="card-body py-2 px-3">'
+                + '<div class="small mb-1"><span class="badge ' + cls + '">' + title + '</span></div>'
+                + '<ul class="mb-0 small">' + arr.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>'
+                + '</div></div>';
+        }
+
+        function setQr(src) {
+            if ($qr)  { $qr.src = src || ''; $qr.style.display  = src ? 'block' : 'none'; }
+            if ($qrE) { $qrE.style.display = src ? 'none' : 'block'; }
+        }
+
+        async function load() {
+            if (!$sel) return;
+            $sel.innerHTML = '<option value="">Cargando...</option>';
+            try {
+                var r = await fetch('/configuracion/conexion-info');
+                var d = await r.json();
+                if (!r.ok) throw new Error(d.error || 'Error');
+                var urls = Array.isArray(d.urls) ? d.urls : [];
+                var pref = String(d.preferred_url || '').trim();
+                $sel.innerHTML = '';
+                if (!urls.length) { $sel.innerHTML = '<option value="">Sin URLs detectadas</option>'; }
+                else urls.forEach(function (u) {
+                    var o = document.createElement('option');
+                    o.value = u; o.textContent = u;
+                    if (u === pref) o.selected = true;
+                    $sel.appendChild(o);
+                });
+                setQr(d.qr_data_url || null);
+                if ($meta) {
+                    var ips = Array.isArray(d.ips_locales) ? d.ips_locales : [];
+                    $meta.textContent = 'Host: ' + (d.host_header || '-') + '  ·  Puerto: ' + (d.puerto || '-')
+                        + '  ·  IPs LAN: ' + (ips.length ? ips.join(', ') : 'No detectadas');
+                }
+                setDiag(false);
+            } catch (e) {
+                setQr(null);
+                if ($meta) $meta.textContent = 'Error: ' + String(e.message || e);
+            }
+        }
+
+        async function copy() {
+            var url = selUrl(); if (!url) return;
+            try { await navigator.clipboard.writeText(url); alert('URL copiada'); }
+            catch (_) {
+                var t = document.createElement('input'); t.value = url;
+                document.body.appendChild(t); t.select();
+                try { document.execCommand('copy'); } catch (_2) {}
+                document.body.removeChild(t); alert('URL copiada');
+            }
+        }
+
+        async function diagnosticar() {
+            var target = selUrl(); if (!target) return;
+            setDiag(true);
+            if ($dE) $dE.innerHTML = '<span class="badge text-bg-secondary">Diagnóstico en curso...</span>';
+            if ($dC) $dC.innerHTML = ''; if ($dR) $dR.innerHTML = '';
+            try {
+                var r = await fetch('/configuracion/diagnostico?target_url=' + encodeURIComponent(target));
+                var d = await r.json();
+                if (!r.ok) throw new Error(d.error || 'Error');
+                var ok = !!(d.db_ok && d.server_http_ok);
+                if ($dE) $dE.innerHTML = ok
+                    ? '<span class="badge text-bg-success">Conexión OK</span>'
+                    : '<span class="badge text-bg-danger">Se detectaron problemas</span>';
+                renderList($dC, 'Posibles causas', d.posibles_causas, 'text-bg-warning');
+                renderList($dR, 'Recomendaciones', d.recomendaciones, 'text-bg-primary');
+            } catch (e) {
+                if ($dE) $dE.innerHTML = '<span class="badge text-bg-danger">Error: ' + String(e.message || e) + '</span>';
+            }
+        }
+
+        if ($ref) $ref.addEventListener('click', load);
+        if ($cop) $cop.addEventListener('click', copy);
+        if ($dia) $dia.addEventListener('click', diagnosticar);
+
+        // Cargar al entrar en la pestaña Red
+        document.getElementById('tab-red-btn') && document.getElementById('tab-red-btn')
+            .addEventListener('shown.bs.tab', load);
+    })();
     </script>
 </body>
-</html> 
+</html>

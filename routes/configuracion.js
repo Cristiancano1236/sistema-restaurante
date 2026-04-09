@@ -233,25 +233,66 @@ function execCommand(command) {
     });
 }
 
-async function imprimirTextoServidor(texto, impresoraNombre) {
-    const tmpFile = path.join(os.tmpdir(), `comanda-prueba-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
-    fs.writeFileSync(tmpFile, String(texto || ''), { encoding: 'utf8' });
+// Construye el script PowerShell que usa System.Drawing.Printing.PrintDocument
+// para fijar el tamaño del papel térmico.
+// Misma lógica que buildThermalPsScript en routes/mesas.js y routes/facturas.js
+function buildThermalPsScript(psPath, psPrinter, anchoMm, fontSize) {
+    const widthH = Math.round(Number(anchoMm || 80) * 100 / 25.4);
+    const pt     = Number(fontSize || 1) === 2 ? '10' : '8.5';
+    const lines  = [
+        'Add-Type -AssemblyName System.Drawing',
+        "$script:ls = [System.IO.File]::ReadAllLines('" + psPath + "', [System.Text.Encoding]::UTF8)",
+        '$script:i = 0',
+        '$pd = New-Object System.Drawing.Printing.PrintDocument',
+    ];
+    if (psPrinter) lines.push("$pd.PrinterSettings.PrinterName = '" + psPrinter + "'");
+    lines.push(
+        '$ps = New-Object System.Drawing.Printing.PaperSize("ThermalTicket", ' + widthH + ', 2000)',
+        '$pd.DefaultPageSettings.PaperSize = $ps',
+        '$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(10, 10, 10, 0)',
+        '$script:fn = New-Object System.Drawing.Font("Courier New", ' + pt + ')',
+        '$pd.add_PrintPage({',
+        '    param($s, $e)',
+        '    $y = [float]0',
+        '    $lh = [float]$script:fn.GetHeight($e.Graphics)',
+        '    while ($script:i -lt $script:ls.Length) {',
+        '        $e.Graphics.DrawString($script:ls[$script:i], $script:fn, [System.Drawing.Brushes]::Black, [float]0, $y)',
+        '        $y += $lh',
+        '        $script:i++',
+        '        if (($y + $lh) -gt [float]$e.MarginBounds.Height) { $e.HasMorePages = ($script:i -lt $script:ls.Length); break }',
+        '    }',
+        '})',
+        '$pd.Print()',
+        '$script:fn.Dispose()',
+        '$pd.Dispose()'
+    );
+    return lines.join('\r\n');
+}
+
+// Imprime texto plano en la impresora del servidor (prueba de comanda).
+// Usa System.Drawing.Printing para fijar el tamaño del papel térmico.
+// Relacionado con: POST /impresion/comanda-prueba
+async function imprimirTextoServidor(texto, impresoraNombre, anchoPapelMm, fontSize) {
+    const tmpFile = path.join(
+        os.tmpdir(),
+        `comanda-prueba-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
+    );
+    const bom  = Buffer.from([0xEF, 0xBB, 0xBF]);
+    const body = Buffer.from(String(texto || ''), 'utf8');
+    fs.writeFileSync(tmpFile, Buffer.concat([bom, body]));
     try {
         if (process.platform === 'win32') {
-            const psPath = tmpFile.replace(/'/g, "''");
-            const psPrinter = String(impresoraNombre || '').replace(/'/g, "''");
-            const cmd = psPrinter
-                ? `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '${psPath}' | Out-Printer -Name '${psPrinter}'"`
-                : `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '${psPath}' | Out-Printer"`;
-            await execCommand(cmd);
+            const psPath    = tmpFile.replace(/'/g, "''");
+            const psPrinter = String(impresoraNombre || '').trim().replace(/'/g, "''");
+            const psScript  = buildThermalPsScript(psPath, psPrinter, anchoPapelMm, fontSize);
+            const encoded   = Buffer.from(psScript, 'utf16le').toString('base64');
+            await execCommand('powershell -NoProfile -NonInteractive -EncodedCommand ' + encoded);
             return;
         }
-        const quoted = `"${tmpFile.replace(/"/g, '\\"')}"`;
-        const p = String(impresoraNombre || '').trim();
-        const cmd = p
-            ? `lp -d "${p.replace(/"/g, '\\"')}" ${quoted}`
-            : `lp ${quoted}`;
-        await execCommand(cmd);
+        // Linux / macOS — CUPS
+        const quoted = '"' + tmpFile.replace(/"/g, '\\"') + '"';
+        const p      = String(impresoraNombre || '').trim();
+        await execCommand(p ? 'lp -d "' + p.replace(/"/g, '\\"') + '" ' + quoted : 'lp ' + quoted);
     } finally {
         try { fs.unlinkSync(tmpFile); } catch (_) {}
     }
@@ -261,10 +302,12 @@ async function imprimirTextoServidor(texto, impresoraNombre) {
 // Imprime una comanda de prueba desde el servidor (PC), sin navegador móvil.
 router.post('/impresion/comanda-prueba', async (req, res) => {
     try {
-        const [rows] = await db.query('SELECT nombre_negocio, impresora_comandas FROM configuracion_impresion LIMIT 1');
-        const cfg = rows?.[0] || {};
-        const negocio = String(cfg?.nombre_negocio || 'MI NEGOCIO');
+        const [rows] = await db.query('SELECT nombre_negocio, impresora_comandas, ancho_papel, font_size FROM configuracion_impresion LIMIT 1');
+        const cfg       = rows?.[0] || {};
+        const negocio   = String(cfg?.nombre_negocio || 'MI NEGOCIO');
         const impresora = String(cfg?.impresora_comandas || '').trim() || null;
+        const anchoPapel = Number(cfg?.ancho_papel || 80);
+        const fontSize   = Number(cfg?.font_size   || 1);
 
         const line = '-'.repeat(42);
         const texto = [
@@ -281,7 +324,7 @@ router.post('/impresion/comanda-prueba', async (req, res) => {
             'Fin de prueba'
         ].join('\r\n');
 
-        await imprimirTextoServidor(texto, impresora);
+        await imprimirTextoServidor(texto, impresora, anchoPapel, fontSize);
         res.json({ ok: true, impresora: impresora || 'predeterminada' });
     } catch (error) {
         console.error('Error al imprimir comanda de prueba:', error);

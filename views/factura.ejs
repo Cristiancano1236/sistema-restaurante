@@ -5,19 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Factura #<%= factura.id %></title>
     <style>
+        /* ====================================================
+           REGLA @page — CRÍTICA para impresoras térmicas.
+           Elimina encabezados/pies del navegador (URL, fecha,
+           número de página) y fija el ancho del papel.
+           Relacionado con: routes/facturas.js (GET /:id/imprimir)
+           ==================================================== */
+        @page {
+            margin: 0mm 0mm 8mm 0mm;
+            size: <%= config.ancho_papel %>mm auto;
+        }
+
         @media print {
-            body {
+            html, body {
                 width: <%= config.ancho_papel %>mm;
+                max-width: <%= config.ancho_papel %>mm;
                 margin: 0;
-                padding: 5px;
+                padding: 3mm 3mm 8mm 3mm;
                 font-size: <%= config.font_size === 2 ? '1.2em' : '1em' %>;
+                background: #fff !important;
+                color: #000 !important;
             }
             .no-print {
-                display: none;
+                display: none !important;
             }
             table {
                 font-size: 0.9em;
             }
+            .producto-item { page-break-inside: avoid; break-inside: avoid; }
         }
 
         body {

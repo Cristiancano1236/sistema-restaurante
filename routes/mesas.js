@@ -105,34 +105,83 @@ function buildComandaTexto({ pedido, items, negocio }) {
 
 function execCommand(command) {
     return new Promise((resolve, reject) => {
-        exec(command, { timeout: 20000 }, (error, stdout, stderr) => {
+        exec(command, { timeout: 25000 }, (error, stdout, stderr) => {
             if (error) return reject(new Error(String(stderr || error.message || 'Error al ejecutar comando de impresión')));
             resolve({ stdout, stderr });
         });
     });
 }
 
-async function imprimirTextoEnServidor(texto, impresoraNombre) {
-    const tmpFile = path.join(os.tmpdir(), `comanda-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
-    fs.writeFileSync(tmpFile, String(texto || ''), { encoding: 'utf8' });
+// Construye el script PowerShell que usa System.Drawing.Printing.PrintDocument
+// para imprimir en papel térmico con el tamaño de papel correcto.
+// SIN esto, Out-Printer usa carta/A4 y el texto queda microscópico en papel de 80mm.
+// Relacionado con: imprimirTextoEnServidor (abajo), imprimirTextoServidor en facturas.js
+function buildThermalPsScript(psPath, psPrinter, anchoMm, fontSize) {
+    // 1 pulgada = 25.4 mm. PaperSize trabaja en centésimas de pulgada.
+    const widthH = Math.round(Number(anchoMm || 80) * 100 / 25.4);
+    // Fuente monoespaciada; tamaño depende de config (1=8.5pt normal, 2=10pt grande)
+    const pt = Number(fontSize || 1) === 2 ? '10' : '8.5';
+
+    const lines = [
+        'Add-Type -AssemblyName System.Drawing',
+        "$script:ls = [System.IO.File]::ReadAllLines('" + psPath + "', [System.Text.Encoding]::UTF8)",
+        '$script:i = 0',
+        '$pd = New-Object System.Drawing.Printing.PrintDocument',
+    ];
+    if (psPrinter) {
+        lines.push("$pd.PrinterSettings.PrinterName = '" + psPrinter + "'");
+    }
+    lines.push(
+        '$ps = New-Object System.Drawing.Printing.PaperSize("ThermalTicket", ' + widthH + ', 2000)',
+        '$pd.DefaultPageSettings.PaperSize = $ps',
+        '$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(10, 10, 10, 0)',
+        '$script:fn = New-Object System.Drawing.Font("Courier New", ' + pt + ')',
+        '$pd.add_PrintPage({',
+        '    param($s, $e)',
+        '    $y = [float]0',
+        '    $lh = [float]$script:fn.GetHeight($e.Graphics)',
+        '    while ($script:i -lt $script:ls.Length) {',
+        '        $e.Graphics.DrawString($script:ls[$script:i], $script:fn, [System.Drawing.Brushes]::Black, [float]0, $y)',
+        '        $y += $lh',
+        '        $script:i++',
+        '        if (($y + $lh) -gt [float]$e.MarginBounds.Height) { $e.HasMorePages = ($script:i -lt $script:ls.Length); break }',
+        '    }',
+        '})',
+        '$pd.Print()',
+        '$script:fn.Dispose()',
+        '$pd.Dispose()'
+    );
+    return lines.join('\r\n');
+}
+
+// Imprime texto plano en la impresora del servidor (comanda).
+// anchoPapelMm: ancho del rollo térmico en mm (58 o 80), viene de configuracion_impresion.
+// fontSize: 1=normal, 2=grande (idem config).
+// Relacionado con: POST /pedidos/:id/comanda/imprimir-servidor
+async function imprimirTextoEnServidor(texto, impresoraNombre, anchoPapelMm, fontSize) {
+    const tmpFile = path.join(
+        os.tmpdir(),
+        `comanda-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
+    );
+    // BOM UTF-8 para que ReadAllLines de .NET lo lea correctamente en Windows
+    const bom  = Buffer.from([0xEF, 0xBB, 0xBF]);
+    const body = Buffer.from(String(texto || ''), 'utf8');
+    fs.writeFileSync(tmpFile, Buffer.concat([bom, body]));
+
     try {
         if (process.platform === 'win32') {
-            const psPath = tmpFile.replace(/'/g, "''");
-            const psPrinter = String(impresoraNombre || '').replace(/'/g, "''");
-            const cmd = psPrinter
-                ? `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '${psPath}' | Out-Printer -Name '${psPrinter}'"`
-                : `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '${psPath}' | Out-Printer"`;
-            await execCommand(cmd);
+            const psPath    = tmpFile.replace(/'/g, "''");
+            const psPrinter = String(impresoraNombre || '').trim().replace(/'/g, "''");
+            const psScript  = buildThermalPsScript(psPath, psPrinter, anchoPapelMm, fontSize);
+            // EncodedCommand (Base64 UTF-16LE) evita problemas de encoding en cmd.exe
+            const encoded   = Buffer.from(psScript, 'utf16le').toString('base64');
+            await execCommand('powershell -NoProfile -NonInteractive -EncodedCommand ' + encoded);
             return;
         }
-
-        // Linux/macOS (CUPS)
-        const quoted = `"${tmpFile.replace(/"/g, '\\"')}"`;
-        const p = String(impresoraNombre || '').trim();
-        const cmd = p
-            ? `lp -d "${p.replace(/"/g, '\\"')}" ${quoted}`
-            : `lp ${quoted}`;
-        await execCommand(cmd);
+        // Linux / macOS — CUPS
+        const quoted = '"' + tmpFile.replace(/"/g, '\\"') + '"';
+        const p      = String(impresoraNombre || '').trim();
+        await execCommand(p ? 'lp -d "' + p.replace(/"/g, '\\"') + '" ' + quoted : 'lp ' + quoted);
     } finally {
         try { fs.unlinkSync(tmpFile); } catch (_) {}
     }
@@ -523,8 +572,11 @@ router.post('/pedidos/:pedidoId/comanda/imprimir-servidor', async (req, res) => 
         }
 
         const [cfgRows] = await db.query('SELECT * FROM configuracion_impresion LIMIT 1');
-        const cfg = cfgRows?.[0] || {};
+        const cfg         = cfgRows?.[0] || {};
         const printerName = String(cfg?.impresora_comandas || '').trim() || null;
+        // Parámetros de papel — necesarios para System.Drawing.Printing (tamaño del rollo térmico)
+        const anchoPapel  = Number(cfg?.ancho_papel || 80);
+        const fontSize    = Number(cfg?.font_size   || 1);
 
         const [pedidos] = await db.query(
             `SELECT p.*, m.numero AS mesa_numero
@@ -556,7 +608,7 @@ router.post('/pedidos/:pedidoId/comanda/imprimir-servidor', async (req, res) => 
             items,
             negocio: cfg?.nombre_negocio || 'COMANDA'
         });
-        await imprimirTextoEnServidor(texto, printerName);
+        await imprimirTextoEnServidor(texto, printerName, anchoPapel, fontSize);
 
         const idsImpresos = items.map((it) => Number(it.id)).filter((n) => Number.isInteger(n) && n > 0);
         await db.query(

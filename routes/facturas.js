@@ -45,33 +45,71 @@ function almostEqualMoney(a, b) {
 
 function execCommand(command) {
     return new Promise((resolve, reject) => {
-        exec(command, { timeout: 20000 }, (error, stdout, stderr) => {
+        exec(command, { timeout: 25000 }, (error, stdout, stderr) => {
             if (error) return reject(new Error(String(stderr || error.message || 'Error al ejecutar impresion')));
             resolve({ stdout, stderr });
         });
     });
 }
 
-async function imprimirTextoServidor(texto, impresoraNombre, copias = 1) {
+// Construye el script PowerShell para imprimir en impresora térmica con tamaño correcto.
+// Usa System.Drawing.Printing.PrintDocument para fijar el ancho del papel (mm → centésimas de pulgada).
+// Sin esto, Out-Printer renderiza con carta/A4 y el texto queda microscópico en papel de 80mm.
+// Relacionado con: imprimirTextoServidor (abajo), buildThermalPsScript en mesas.js
+function buildThermalPsScript(psPath, psPrinter, anchoMm, fontSize) {
+    const widthH = Math.round(Number(anchoMm || 80) * 100 / 25.4);
+    const pt     = Number(fontSize || 1) === 2 ? '10' : '8.5';
+    const lines  = [
+        'Add-Type -AssemblyName System.Drawing',
+        "$script:ls = [System.IO.File]::ReadAllLines('" + psPath + "', [System.Text.Encoding]::UTF8)",
+        '$script:i = 0',
+        '$pd = New-Object System.Drawing.Printing.PrintDocument',
+    ];
+    if (psPrinter) lines.push("$pd.PrinterSettings.PrinterName = '" + psPrinter + "'");
+    lines.push(
+        '$ps = New-Object System.Drawing.Printing.PaperSize("ThermalTicket", ' + widthH + ', 2000)',
+        '$pd.DefaultPageSettings.PaperSize = $ps',
+        '$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(10, 10, 10, 0)',
+        '$script:fn = New-Object System.Drawing.Font("Courier New", ' + pt + ')',
+        '$pd.add_PrintPage({',
+        '    param($s, $e)',
+        '    $y = [float]0',
+        '    $lh = [float]$script:fn.GetHeight($e.Graphics)',
+        '    while ($script:i -lt $script:ls.Length) {',
+        '        $e.Graphics.DrawString($script:ls[$script:i], $script:fn, [System.Drawing.Brushes]::Black, [float]0, $y)',
+        '        $y += $lh',
+        '        $script:i++',
+        '        if (($y + $lh) -gt [float]$e.MarginBounds.Height) { $e.HasMorePages = ($script:i -lt $script:ls.Length); break }',
+        '    }',
+        '})',
+        '$pd.Print()',
+        '$script:fn.Dispose()',
+        '$pd.Dispose()'
+    );
+    return lines.join('\r\n');
+}
+
+// Imprime texto plano en la impresora del servidor (factura).
+// anchoPapelMm y fontSize vienen de configuracion_impresion.
+// Relacionado con: POST /:id/imprimir-servidor
+async function imprimirTextoServidor(texto, impresoraNombre, copias, anchoPapelMm, fontSize) {
     const tmpFile = path.join(os.tmpdir(), `factura-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
-    fs.writeFileSync(tmpFile, String(texto || ''), { encoding: 'utf8' });
+    const bom  = Buffer.from([0xEF, 0xBB, 0xBF]);
+    const body = Buffer.from(String(texto || ''), 'utf8');
+    fs.writeFileSync(tmpFile, Buffer.concat([bom, body]));
     try {
         const n = Math.max(1, Number(copias || 1) || 1);
-        for (let i = 0; i < n; i += 1) {
+        for (let c = 0; c < n; c += 1) {
             if (process.platform === 'win32') {
-                const psPath = tmpFile.replace(/'/g, "''");
-                const psPrinter = String(impresoraNombre || '').replace(/'/g, "''");
-                const cmd = psPrinter
-                    ? `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '${psPath}' | Out-Printer -Name '${psPrinter}'"`
-                    : `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '${psPath}' | Out-Printer"`;
-                await execCommand(cmd);
+                const psPath    = tmpFile.replace(/'/g, "''");
+                const psPrinter = String(impresoraNombre || '').trim().replace(/'/g, "''");
+                const psScript  = buildThermalPsScript(psPath, psPrinter, anchoPapelMm, fontSize);
+                const encoded   = Buffer.from(psScript, 'utf16le').toString('base64');
+                await execCommand('powershell -NoProfile -NonInteractive -EncodedCommand ' + encoded);
             } else {
-                const quoted = `"${tmpFile.replace(/"/g, '\\"')}"`;
-                const p = String(impresoraNombre || '').trim();
-                const cmd = p
-                    ? `lp -d "${p.replace(/"/g, '\\"')}" ${quoted}`
-                    : `lp ${quoted}`;
-                await execCommand(cmd);
+                const quoted = '"' + tmpFile.replace(/"/g, '\\"') + '"';
+                const p      = String(impresoraNombre || '').trim();
+                await execCommand(p ? 'lp -d "' + p.replace(/"/g, '\\"') + '" ' + quoted : 'lp ' + quoted);
             }
         }
     } finally {
@@ -401,9 +439,12 @@ router.post('/:id/imprimir-servidor', async (req, res) => {
         }
 
         const [configRows] = await db.query('SELECT * FROM configuracion_impresion LIMIT 1');
-        const config = configRows?.[0] || {};
+        const config      = configRows?.[0] || {};
         const printerName = String(config?.impresora_facturas || '').trim() || null;
-        const copias = Math.max(1, Number(config?.factura_copias || 1) || 1);
+        const copias      = Math.max(1, Number(config?.factura_copias || 1) || 1);
+        // Parámetros de papel para System.Drawing.Printing (tamaño del rollo térmico)
+        const anchoPapel  = Number(config?.ancho_papel || 80);
+        const fontSize    = Number(config?.font_size   || 1);
 
         const [facturas] = await db.query(
             `SELECT f.*, c.nombre as cliente_nombre, c.direccion, c.telefono
@@ -441,7 +482,7 @@ router.post('/:id/imprimir-servidor', async (req, res) => {
             pagos,
             negocio: config || {}
         });
-        await imprimirTextoServidor(texto, printerName, copias);
+        await imprimirTextoServidor(texto, printerName, copias, anchoPapel, fontSize);
         res.json({ printed: true, impresora: printerName || 'predeterminada', copias });
     } catch (error) {
         console.error('Error al imprimir factura en servidor:', error);
