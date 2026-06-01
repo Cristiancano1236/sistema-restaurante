@@ -227,7 +227,7 @@ $(function() {
       preConfirm: () => {
         const rows = window.__pm_getRows ? window.__pm_getRows() : null;
         if (!rows) return false;
-        const pagos = Array.from(rows.querySelectorAll('.pm-row')).map(r => {
+        let pagos = Array.from(rows.querySelectorAll('.pm-row')).map(r => {
           const metodo = (r.querySelector('.pm-metodo')?.value || '').trim();
           const monto = parseMoneyInput(r.querySelector('.pm-monto')?.value || 0);
           const referencia = (r.querySelector('.pm-ref')?.value || '').trim();
@@ -240,9 +240,24 @@ $(function() {
         }
 
         const sum = pagos.reduce((a, p) => a + Number(p.monto || 0), 0);
-        if (!almostEqualMoney(sum, total)) {
-          window.__pm_setWarn && window.__pm_setWarn(`La sumatoria (${formatMoney(sum)}) debe ser igual al total (${formatMoney(total)}).`);
+
+        // Bloquear solo si la suma es MENOR al total (falta dinero)
+        if (sum < Number(total) - 0.01) {
+          window.__pm_setWarn && window.__pm_setWarn(`La sumatoria (${formatMoney(sum)}) es menor al total (${formatMoney(total)}). Falta: ${formatMoney(Number(total) - sum)}`);
           return false;
+        }
+
+        // Si hay vuelto (cliente paga con billete mayor), reducir el último pago
+        // para guardar solo el monto cobrado, no el excedente devuelto como cambio
+        if (sum > Number(total) + 0.01) {
+          const exceso = Number((sum - Number(total)).toFixed(2));
+          for (let i = pagos.length - 1; i >= 0; i--) {
+            if (pagos[i].monto >= exceso) {
+              pagos[i] = { ...pagos[i], monto: Number((pagos[i].monto - exceso).toFixed(2)) };
+              break;
+            }
+          }
+          pagos = pagos.filter(p => p.monto > 0);
         }
 
         // Limpieza final

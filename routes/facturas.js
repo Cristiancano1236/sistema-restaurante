@@ -170,7 +170,8 @@ router.post('/', async (req, res) => {
     let formaPagoDB = (forma_pago || 'efectivo');
     if (pagosNorm.length > 0) {
         const suma = sumatoriaPagos(pagosNorm);
-        if (!almostEqualMoney(suma, totalNum)) {
+        // Solo rechazar si la suma es menor al total (falta dinero)
+        if (suma < Number(totalNum) - 0.01) {
             return res.status(400).json({ error: 'La suma de pagos no coincide con el total' });
         }
         formaPagoDB = pagosNorm.length === 1 ? pagosNorm[0].metodo : 'mixto';

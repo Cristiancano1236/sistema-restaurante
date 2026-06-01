@@ -1089,11 +1089,11 @@ router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
             };
             const pagosNorm = normalizarPagos(pagos);
             const sumaPagos = pagosNorm.reduce((acc, p) => acc + Number(p.monto || 0), 0);
-            const almostEqualMoney = (a, b) => Math.abs(Number(a) - Number(b)) < 0.01;
 
             let formaPagoDB = String(forma_pago || 'efectivo').toLowerCase();
             if (pagosNorm.length > 0) {
-                if (!almostEqualMoney(sumaPagos, total)) {
+                // Solo rechazar si la suma es menor al total (falta dinero)
+                if (sumaPagos < Number(total) - 0.01) {
                     throw new Error('La suma de pagos no coincide con el total');
                 }
                 formaPagoDB = (pagosNorm.length === 1) ? pagosNorm[0].metodo : 'mixto';

@@ -138,12 +138,15 @@ router.get('/export', async (req, res) => {
         }
         const { whereSql, params } = buildVentasWhere(req.query);
         const query = `
-            SELECT f.id, f.fecha, c.nombre as cliente, f.forma_pago, f.total
+            SELECT f.id, f.fecha, c.nombre as cliente, f.forma_pago, f.total,
+                   p.nombre as producto
             FROM facturas f
             JOIN clientes c ON f.cliente_id = c.id
+            LEFT JOIN detalle_factura df ON df.factura_id = f.id
+            LEFT JOIN productos p ON p.id = df.producto_id
             ${whereSql}
         `;
-        const queryFinal = `${query} ORDER BY f.fecha DESC`;
+        const queryFinal = `${query} ORDER BY f.fecha DESC, f.id, p.nombre`;
 
         const [rows] = await db.query(queryFinal, params);
         const totales = await getTotalesPorMetodo(req.query);
@@ -169,9 +172,9 @@ router.get('/export', async (req, res) => {
         const rango = `Rango: ${req.query.desde || '-'} a ${req.query.hasta || '-'}${req.query.q ? '  •  Filtro: ' + req.query.q : ''}`;
 
         // Mover título a partir de la columna B para dejar el logo en A
-        ws.mergeCells('B1:E1');
-        ws.mergeCells('B2:E2');
-        ws.mergeCells('B3:E3');
+        ws.mergeCells('B1:F1');
+        ws.mergeCells('B2:F2');
+        ws.mergeCells('B3:F3');
         ws.getRow(1).values = ['', titulo];
         ws.getRow(2).values = ['', subInfo];
         ws.getRow(3).values = ['', rango];
@@ -195,7 +198,7 @@ router.get('/export', async (req, res) => {
         }
 
         // Crear encabezado de columnas manual (fila siguiente disponible)
-        const headerRow = ws.addRow(['Factura #','Fecha','Cliente','Forma de Pago','Total']);
+        const headerRow = ws.addRow(['Factura #','Fecha','Cliente','Forma de Pago','Total','Producto']);
         headerRow.font = { bold: true, color: { argb: 'FF212529' } };
         headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
         headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE9ECEF' } };
@@ -206,6 +209,7 @@ router.get('/export', async (req, res) => {
         ws.getColumn(3).width = 32;
         ws.getColumn(4).width = 18;
         ws.getColumn(5).width = 14;
+        ws.getColumn(6).width = 28;
 
         // Datos y totales
         let totalEfectivo = 0, totalTransferencia = 0, totalTarjeta = 0, totalGeneral = 0;
@@ -219,7 +223,8 @@ router.get('/export', async (req, res) => {
                 fecha.toLocaleString(),
                 r.cliente || '',
                 (r.forma_pago || '').charAt(0).toUpperCase() + (r.forma_pago || '').slice(1),
-                total
+                total,
+                r.producto || ''
             ]);
         });
 
@@ -244,10 +249,10 @@ router.get('/export', async (req, res) => {
         // Totales
         const start = ws.rowCount + 2;
         ws.addRow([]);
-        ws.addRow(['', '', 'Total Efectivo:', '', totalEfectivo]).font = { bold: true };
-        ws.addRow(['', '', 'Total Transferencia:', '', totalTransferencia]).font = { bold: true };
-        ws.addRow(['', '', 'Total Tarjeta:', '', totalTarjeta]).font = { bold: true };
-        ws.addRow(['', '', 'Total General:', '', totalGeneral]).font = { bold: true };
+        ws.addRow(['', '', 'Total Efectivo:', '', totalEfectivo, '']).font = { bold: true };
+        ws.addRow(['', '', 'Total Transferencia:', '', totalTransferencia, '']).font = { bold: true };
+        ws.addRow(['', '', 'Total Tarjeta:', '', totalTarjeta, '']).font = { bold: true };
+        ws.addRow(['', '', 'Total General:', '', totalGeneral, '']).font = { bold: true };
         for (let i = start; i <= ws.rowCount; i++) {
             ws.getRow(i).getCell(5).numFmt = '[$$-409]#,##0.00';
             ws.getRow(i).getCell(3).alignment = { horizontal: 'right' };
