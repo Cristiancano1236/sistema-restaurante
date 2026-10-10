@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de stock</title>
+    <link href="/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.css">
+    <style>
+        html, body { height: 100%; }
+        body { min-height: 100vh; display: flex; flex-direction: column; background-color: #f8f9fa; }
+        .navbar { background-color: #2c3e50; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+        .navbar-brand { color: white !important; font-weight: bold; }
+        .card { border: none; box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.05); margin-bottom: 1.5rem; }
+        .card-header { background-color: #fff; border-bottom: 2px solid #f8f9fa; font-weight: 600; }
+        .search-box { max-width: 300px; }
+        .table th { border-top: none; }
+        .action-buttons .btn { padding: 0.25rem 0.5rem; }
+        .kpi-card {
+            border-left: 4px solid #0d6efd;
+            background: #fff;
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,.06);
+        }
+        .kpi-card.green  { border-left-color: #198754; }
+        .kpi-card.orange { border-left-color: #fd7e14; }
+        .kpi-card.red    { border-left-color: #dc3545; }
+        .kpi-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+        .kpi-label { font-size: .78rem; color: #6c757d; text-transform: uppercase; letter-spacing: .05em; }
+    </style>
+</head>
+<body>
+    <%- include('partials/navbar') %>
+
+    <main class="flex-grow-1">
+        <div class="container">
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-4">
+                    <div class="kpi-card green">
+                        <div class="kpi-label"><i class="bi bi-clipboard-data me-1"></i>Con control</div>
+                        <div class="kpi-value text-success" id="metricControlados">0</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="kpi-card orange">
+                        <div class="kpi-label"><i class="bi bi-exclamation-triangle me-1"></i>Bajo mínimo</div>
+                        <div class="kpi-value text-warning" id="metricBajos">0</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="kpi-card red">
+                        <div class="kpi-label"><i class="bi bi-x-circle me-1"></i>Agotados</div>
+                        <div class="kpi-value text-danger" id="metricAgotados">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <i class="bi bi-clipboard-data me-2"></i>
+                        Control de stock
+                    </div>
+                    <div class="btn-group" id="filtrosStock">
+                        <button type="button" class="btn btn-primary btn-sm" data-filtro="todos">Todos</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-filtro="bajos">Bajos</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-filtro="agotados">Agotados</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-filtro="sin_control">Sin control</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-4">
+                        <div class="col">
+                            <div class="input-group search-box ms-auto">
+                                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                <input type="search" class="form-control" id="buscarStock" placeholder="Buscar producto...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Código</th>
+                                    <th>Nombre</th>
+                                    <th class="text-end">Existencia</th>
+                                    <th class="text-end">Mínimo</th>
+                                    <th>Estado</th>
+                                    <th class="text-center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tablaStock"></tbody>
+                        </table>
+                    </div>
+                    <div id="stockVacio" class="text-muted text-center d-none">No hay productos para este filtro.</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal fade" id="modalStock" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-clipboard-data me-2"></i>
+                        <span id="modalNombre">Producto</span>
+                        <span class="text-muted fw-normal" id="modalCodigo"></span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="formStock">
+                        <div id="bloqueActivar">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label" for="unidadStock">Unidad</label>
+                                    <select id="unidadStock" class="form-select">
+                                        <option value="UND">UND</option>
+                                        <option value="KG">KG</option>
+                                        <option value="LB">LB</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label" for="stockInicial">Existencia</label>
+                                    <input id="stockInicial" type="number" class="form-control" min="0" step="0.01" value="0">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label" for="stockMinimo">Mínimo</label>
+                                    <input id="stockMinimo" type="number" class="form-control" min="0" step="0.01" value="0">
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" type="submit" id="btnActivar">
+                                <i class="bi bi-check2 me-1"></i>Activar control
+                            </button>
+                        </div>
+                        <div id="bloqueMovimientos" class="d-none">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label" for="cantidadEntrada">Entrada</label>
+                                    <input id="cantidadEntrada" type="number" class="form-control" min="0.01" step="0.01" placeholder="Cantidad">
+                                </div>
+                                <div class="col-md-8 mb-3">
+                                    <label class="form-label" for="motivoEntrada">Motivo de la entrada</label>
+                                    <input id="motivoEntrada" type="text" class="form-control" maxlength="200" placeholder="Compra, producción, traslado">
+                                </div>
+                            </div>
+                            <button class="btn btn-primary mb-4" type="button" id="btnEntrada">
+                                <i class="bi bi-plus-lg me-1"></i>Registrar entrada
+                            </button>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label" for="stockNuevo">Ajuste a existencia</label>
+                                    <input id="stockNuevo" type="number" class="form-control" min="0" step="0.01">
+                                </div>
+                                <div class="col-md-8 mb-3">
+                                    <label class="form-label" for="motivoAjuste">Motivo del ajuste</label>
+                                    <input id="motivoAjuste" type="text" class="form-control" maxlength="200" placeholder="Conteo, merma, corrección">
+                                </div>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                                <button class="btn btn-primary" type="button" id="btnAjuste">
+                                    <i class="bi bi-save me-1"></i>Guardar ajuste
+                                </button>
+                                <button class="btn btn-outline-danger" type="button" id="btnDesactivar">
+                                    Quitar control de stock
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                    <hr>
+                    <h6 class="mb-3">Kardex</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Tipo</th>
+                                    <th class="text-end">Cantidad</th>
+                                    <th class="text-end">Saldo</th>
+                                    <th>Detalle</th>
+                                </tr>
+                            </thead>
+                            <tbody id="listaKardex"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <%- include('partials/footer') %>
+    <script src="/vendor/jquery/jquery.min.js"></script>
+    <script src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/stock.js"></script>
+</body>
+</html>

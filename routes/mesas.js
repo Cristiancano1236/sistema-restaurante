@@ -5,6 +5,25 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { exec } = require('child_process');
+const stock = require('../services/stock');
+
+function usuarioActualId(req) {
+    const id = Number(req.session?.user?.id);
+    return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+function responderStock(res, err) {
+    if (err && err.name === 'StockError') {
+        res.status(err.status || 409).json({
+            error: err.message,
+            producto: err.producto,
+            disponible: err.disponible,
+            unidad: err.unidad
+        });
+        return true;
+    }
+    return false;
+}
 
 // Rutas para gestión de mesas y pedidos de restaurante
 // - Renderiza la vista de mesas (GET /mesas)
@@ -801,7 +820,7 @@ router.put('/items/:itemId/enviar', async (req, res) => {
             await connection.beginTransaction();
 
             const [itemRows] = await connection.query(
-                `SELECT i.id, i.pedido_id, i.estado
+                `SELECT i.id, i.pedido_id, i.producto_id, i.cantidad, i.unidad_medida, i.estado
                  FROM pedido_items i
                  WHERE i.id = ?
                  LIMIT 1
@@ -818,6 +837,8 @@ router.put('/items/:itemId/enviar', async (req, res) => {
                 connection.release();
                 return res.status(400).json({ error: 'Solo se pueden enviar items pendientes' });
             }
+
+            await stock.descontarPorItem(connection, itemRows[0], usuarioActualId(req));
 
             const pedidoId = Number(itemRows[0].pedido_id);
             const conf = await getEnvioCocinaConfig(connection);
@@ -850,10 +871,12 @@ router.put('/items/:itemId/enviar', async (req, res) => {
         } catch (err) {
             await connection.rollback();
             connection.release();
+            if (responderStock(res, err)) return;
             throw err;
         }
     } catch (error) {
         console.error('Error al enviar item:', error);
+        if (responderStock(res, error)) return;
         res.status(500).json({ error: 'Error al enviar item' });
     }
 });
@@ -876,12 +899,30 @@ router.put('/items/:itemId/cancelar', async (req, res) => {
         const connection = await db.getConnection();
         try {
             await connection.beginTransaction();
+            const [itemRows] = await connection.query(
+                `SELECT i.id, i.producto_id, i.cantidad, i.unidad_medida, i.estado
+                 FROM pedido_items i
+                 WHERE i.id = ?
+                 LIMIT 1
+                 FOR UPDATE`,
+                [itemId]
+            );
+            const actual = itemRows[0];
+            const estadoPrevio = String(actual?.estado || '').toLowerCase();
+            if (!actual || !['pendiente', 'enviado', 'preparando', 'listo'].includes(estadoPrevio)) {
+                await connection.rollback();
+                connection.release();
+                return res.status(400).json({ error: 'No se pudo cancelar: estado no permitido o item no encontrado' });
+            }
+            if (stock.ESTADOS_CON_STOCK.includes(estadoPrevio)) {
+                await stock.devolverPorItem(connection, actual, usuarioActualId(req));
+            }
             const [result] = await connection.query(
                 `UPDATE pedido_items
                  SET estado = 'rechazado'
                  WHERE id = ?
-                   AND estado IN ('pendiente','enviado','preparando','listo')`,
-                [itemId]
+                   AND estado = ?`,
+                [itemId, estadoPrevio]
             );
             if ((result?.affectedRows || 0) === 0) {
                 await connection.rollback();
@@ -898,10 +939,12 @@ router.put('/items/:itemId/cancelar', async (req, res) => {
         } catch (err) {
             await connection.rollback();
             connection.release();
+            if (responderStock(res, err)) return;
             throw err;
         }
     } catch (error) {
         console.error('Error al cancelar item desde mesa:', error);
+        if (responderStock(res, error)) return;
         res.status(500).json({ error: 'Error al cancelar item' });
     }
 });
@@ -1020,33 +1063,62 @@ router.put('/items/:itemId/estado', async (req, res) => {
             return res.json({ message: 'Estado actualizado' });
         }
 
-        let timestampField = null;
-        if (estado === 'preparando') timestampField = 'preparado_at';
-        if (estado === 'listo') timestampField = 'listo_at';
-        if (estado === 'servido') timestampField = 'servido_at';
-
-        if (timestampField) {
-            await db.query(
-                `UPDATE pedido_items SET estado = ?, ${timestampField} = NOW() WHERE id = ?`,
-                [estado, itemId]
-            );
-        } else {
-            await db.query(
-                `UPDATE pedido_items SET estado = ? WHERE id = ?`,
-                [estado, itemId]
-            );
-        }
-
         const connection = await db.getConnection();
         try {
+            await connection.beginTransaction();
+            const [itemRows] = await connection.query(
+                `SELECT i.id, i.producto_id, i.cantidad, i.unidad_medida, i.estado
+                 FROM pedido_items i
+                 WHERE i.id = ?
+                 LIMIT 1
+                 FOR UPDATE`,
+                [itemId]
+            );
+            if (!itemRows.length) {
+                await connection.rollback();
+                connection.release();
+                return res.status(404).json({ error: 'Item no encontrado' });
+            }
+            const actual = itemRows[0];
+            const estadoPrevio = String(actual.estado || '').toLowerCase();
+            if (estadoPrevio === 'pendiente' && stock.ESTADOS_CON_STOCK.includes(estado)) {
+                await stock.descontarPorItem(connection, actual, usuarioActualId(req));
+            }
+            if (stock.ESTADOS_CON_STOCK.includes(estadoPrevio) && ['cancelado', 'rechazado'].includes(estado)) {
+                await stock.devolverPorItem(connection, actual, usuarioActualId(req));
+            }
+
+            let timestampField = null;
+            if (estado === 'preparando') timestampField = 'preparado_at';
+            if (estado === 'listo') timestampField = 'listo_at';
+            if (estado === 'servido') timestampField = 'servido_at';
+
+            if (timestampField) {
+                await connection.query(
+                    `UPDATE pedido_items SET estado = ?, ${timestampField} = NOW() WHERE id = ?`,
+                    [estado, itemId]
+                );
+            } else {
+                await connection.query(
+                    `UPDATE pedido_items SET estado = ? WHERE id = ?`,
+                    [estado, itemId]
+                );
+            }
+
             const mesaId = await getMesaIdByItem(connection, itemId);
             if (mesaId) await syncMesaEstadoByItems(connection, mesaId);
-        } finally {
+            await connection.commit();
             connection.release();
+            res.json({ message: 'Estado actualizado' });
+        } catch (err) {
+            await connection.rollback();
+            connection.release();
+            if (responderStock(res, err)) return;
+            throw err;
         }
-        res.json({ message: 'Estado actualizado' });
     } catch (error) {
         console.error('Error al actualizar estado de item:', error);
+        if (responderStock(res, error)) return;
         res.status(500).json({ error: 'Error al actualizar estado' });
     }
 });

@@ -360,6 +360,15 @@ $(function() {
     renderItems();
   }
 
+  function textoExistencia(p) {
+    if (Number(p?.controla_stock) !== 1) return '';
+    const actual = Number(p.stock_actual || 0);
+    const unidad = p.unidad_stock || 'UND';
+    const minimo = Number(p.stock_minimo || 0);
+    const estado = actual <= 0 ? 'agotado' : (actual <= minimo ? 'bajo' : 'ok');
+    return `Existencia: ${actual} ${unidad}${estado === 'agotado' ? ' (agotado)' : estado === 'bajo' ? ' (bajo)' : ''}`;
+  }
+
   // Buscar productos
   let to;
   $('#buscarProductoMesa').on('input', function(){
@@ -372,10 +381,11 @@ $(function() {
       const list = $('#resultadosProductoMesa');
       list.empty();
       productos.forEach(p => {
+        const existencia = textoExistencia(p);
         const item = $(`
           <a href="#" class="list-group-item list-group-item-action">
             <div><strong>${p.codigo}</strong> - ${p.nombre}</div>
-            <div class="small text-muted">KG: $${p.precio_kg} | UND: $${p.precio_unidad} | LB: $${p.precio_libra}</div>
+            <div class="small text-muted">KG: $${p.precio_kg} | UND: $${p.precio_unidad} | LB: $${p.precio_libra}${existencia ? ' · ' + existencia : ''}</div>
           </a>`);
         item.on('click', e => {
           e.preventDefault();
@@ -426,6 +436,7 @@ $(function() {
           title: `Cantidad para ${p.nombre}`,
           input: 'number',
           inputValue: 1,
+          footer: textoExistencia(p) || undefined,
           inputAttributes:{ step: '0.1', min: '0.1' },
           showCancelButton: true,
           didOpen: () => {
@@ -483,6 +494,7 @@ $(function() {
             <div class="text-start">
               <div class="small text-muted mb-2">
                 Selecciona los <strong>hijos</strong> (opcional) y escribe la <strong>observación</strong>. No cambia el precio del producto padre.
+                ${textoExistencia(p) ? `<div class="mt-1">${textoExistencia(p)}</div>` : ''}
               </div>
 
               <label class="form-label small mb-1">Cantidad</label>
@@ -802,7 +814,12 @@ $(function() {
         printWindow = window.open('about:blank', '_blank');
       }
       for(const it of pendientes){
-        await fetch(`/api/mesas/items/${it.id}/enviar`, { method:'PUT' });
+        const respEnvio = await fetch(`/api/mesas/items/${it.id}/enviar`, { method:'PUT' });
+        const dataEnvio = await respEnvio.json().catch(() => ({}));
+        if(!respEnvio.ok){
+          await cargarPedido(pedidoActual.id);
+          throw new Error(dataEnvio.error || 'No se pudo enviar a cocina');
+        }
       }
 
       // Modo cocina sin dispositivo:
@@ -837,7 +854,7 @@ $(function() {
         title: autoListoComanda ? 'Comanda impresa y pedido en Listos' : 'Enviado a cocina'
       });
     }catch(err){
-      Swal.fire({icon:'error', title:'No se pudo enviar a cocina'});
+      Swal.fire({icon:'error', title: err.message || 'No se pudo enviar a cocina'});
     }
   });
 

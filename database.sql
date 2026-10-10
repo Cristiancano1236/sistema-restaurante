@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS productos (
     precio_kg DECIMAL(10,2) NOT NULL DEFAULT 0,
     precio_unidad DECIMAL(10,2) NOT NULL DEFAULT 0,
     precio_libra DECIMAL(10,2) NOT NULL DEFAULT 0,
+    -- Inventario opt-in: los productos existentes siguen sin control hasta activarlo.
+    controla_stock TINYINT(1) NOT NULL DEFAULT 0,
+    stock_actual DECIMAL(10,2) NOT NULL DEFAULT 0,
+    stock_minimo DECIMAL(10,2) NOT NULL DEFAULT 0,
+    unidad_stock ENUM('KG','UND','LB') NOT NULL DEFAULT 'UND',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -281,4 +286,37 @@ CREATE TABLE IF NOT EXISTS producto_hijos (
     PRIMARY KEY (producto_padre_id, producto_hijo_id),
     FOREIGN KEY (producto_padre_id) REFERENCES productos(id) ON DELETE CASCADE,
     FOREIGN KEY (producto_hijo_id) REFERENCES productos(id) ON DELETE CASCADE
+);
+
+-- 7) Control de stock por producto (kardex)
+-- Se descuenta al enviar a cocina y se devuelve al cancelar o rechazar.
+-- Relacionado con: db.js (ensureSchema), services/stock.js, routes/stock.js
+ALTER TABLE productos
+    ADD COLUMN IF NOT EXISTS controla_stock TINYINT(1) NOT NULL DEFAULT 0;
+
+ALTER TABLE productos
+    ADD COLUMN IF NOT EXISTS stock_actual DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE productos
+    ADD COLUMN IF NOT EXISTS stock_minimo DECIMAL(10,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE productos
+    ADD COLUMN IF NOT EXISTS unidad_stock ENUM('KG','UND','LB') NOT NULL DEFAULT 'UND';
+
+CREATE TABLE IF NOT EXISTS stock_movimientos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    producto_id INT NOT NULL,
+    tipo ENUM('entrada','salida_cocina','devolucion','ajuste') NOT NULL,
+    cantidad DECIMAL(10,2) NOT NULL,
+    stock_anterior DECIMAL(10,2) NOT NULL,
+    stock_nuevo DECIMAL(10,2) NOT NULL,
+    pedido_item_id INT NULL,
+    motivo VARCHAR(200) NULL,
+    usuario_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_stock_item_tipo (pedido_item_id, tipo),
+    KEY idx_stock_producto (producto_id, id),
+    FOREIGN KEY (producto_id) REFERENCES productos(id),
+    FOREIGN KEY (pedido_item_id) REFERENCES pedido_items(id) ON DELETE SET NULL,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
 );

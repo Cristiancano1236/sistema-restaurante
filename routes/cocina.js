@@ -1,6 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const stock = require('../services/stock');
+
+function usuarioActualId(req) {
+    const id = Number(req.session?.user?.id);
+    return Number.isFinite(id) && id > 0 ? id : null;
+}
 const { requireRole } = require('../middleware/auth');
 
 // Rutas para la vista/cola de cocina
@@ -201,24 +207,49 @@ router.put('/mesa/:mesaId/preparar', requireRole(['cocinero', 'administrador']),
 // - views/cocina.ejs (pestañas)
 // - database.sql (estado pedido_items='rechazado')
 router.put('/item/:id/rechazar', requireRole(['cocinero', 'administrador']), async (req, res) => {
+    const connection = await db.getConnection();
     try {
         const id = req.params.id;
-
-        // Solo se permite rechazar items aún en cola/preparación
-        const [result] = await db.query(
-            `UPDATE pedido_items
-             SET estado = 'rechazado'
-             WHERE id = ? AND estado IN ('enviado','preparando','listo')`,
+        await connection.beginTransaction();
+        const [itemRows] = await connection.query(
+            `SELECT i.id, i.producto_id, i.cantidad, i.unidad_medida, i.estado
+             FROM pedido_items i
+             WHERE i.id = ?
+             LIMIT 1
+             FOR UPDATE`,
             [id]
         );
-
-        if ((result?.affectedRows || 0) === 0) {
+        const actual = itemRows[0];
+        const estadoPrevio = String(actual?.estado || '').toLowerCase();
+        if (!actual || !['enviado', 'preparando', 'listo'].includes(estadoPrevio)) {
+            await connection.rollback();
+            connection.release();
             return res.status(400).json({ error: 'No se pudo rechazar: item no encontrado o en estado no válido' });
         }
 
+        await stock.devolverPorItem(connection, actual, usuarioActualId(req));
+        const [result] = await connection.query(
+            `UPDATE pedido_items
+             SET estado = 'rechazado'
+             WHERE id = ? AND estado = ?`,
+            [id, estadoPrevio]
+        );
+        if ((result?.affectedRows || 0) === 0) {
+            await connection.rollback();
+            connection.release();
+            return res.status(400).json({ error: 'No se pudo rechazar: item no encontrado o en estado no válido' });
+        }
+
+        await connection.commit();
+        connection.release();
         res.json({ message: 'Item rechazado' });
     } catch (error) {
+        try { await connection.rollback(); } catch (_) {}
+        connection.release();
         console.error('Error al rechazar item en cocina:', error);
+        if (error && error.name === 'StockError') {
+            return res.status(error.status || 409).json({ error: error.message });
+        }
         res.status(500).json({ error: 'Error al rechazar item' });
     }
 });

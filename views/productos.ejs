@@ -87,6 +87,7 @@
                                 <th class="text-end">Precio KG</th>
                                 <th class="text-end">Precio UND</th>
                                 <th class="text-end">Precio LB</th>
+                                <th class="text-end">Stock</th>
                                 <th class="text-center">Acciones</th>
                             </tr>
                         </thead>
@@ -98,6 +99,13 @@
                                     <td class="text-end">$<%= (Number(producto.precio_kg) || 0).toFixed(2) %></td>
                                     <td class="text-end">$<%= (Number(producto.precio_unidad) || 0).toFixed(2) %></td>
                                     <td class="text-end">$<%= (Number(producto.precio_libra) || 0).toFixed(2) %></td>
+                                    <td class="text-end">
+                                        <% if (Number(producto.controla_stock)) { %>
+                                            <%= Number(producto.stock_actual || 0).toLocaleString('es-CO') %> <%= producto.unidad_stock || 'UND' %>
+                                        <% } else { %>
+                                            <span class="text-muted">Sin control</span>
+                                        <% } %>
+                                    </td>
                                     <td class="text-center">
                                         <div class="action-buttons">
                                             <!-- Gestión de productos hijos (Padre -> Hijos) -->

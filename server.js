@@ -96,6 +96,7 @@ const configuracionRoutes = require('./routes/configuracion');
 const ventasRoutes = require('./routes/ventas');
 const authRoutes = require('./routes/auth');
 const usuariosRoutes = require('./routes/usuarios');
+const stockRoutes = require('./routes/stock');
 
 // Auth routes (públicas): /login /logout /setup
 app.use(authRoutes);
@@ -140,6 +141,7 @@ app.use('/api/cocina', requireRole(['cocinero', 'mesero', 'administrador']), coc
 // Configuración y ventas (admin)
 app.use('/configuracion', requireRole('administrador'), configuracionRoutes);
 app.use('/ventas', requireRole('administrador'), ventasRoutes);
+app.use('/stock', requireRole('administrador'), stockRoutes);
 
 // Ruta para la página de productos
 app.get('/productos', async (req, res) => {
@@ -198,6 +200,7 @@ async function startServer() {
         console.log('Intentando conectar a la base de datos...');
         const connection = await db.getConnection();
         connection.release();
+        if (typeof db.ensureSchema === 'function') await db.ensureSchema();
         console.log('Conexión exitosa a la base de datos');
 
         // Iniciar el servidor solo si la conexión a la base de datos es exitosa.
