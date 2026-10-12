@@ -113,6 +113,13 @@ async function ensureSchemaOnce() {
         }
 
         await pool.query(`
+            INSERT INTO productos (codigo, nombre, precio_kg, precio_unidad, precio_libra, controla_stock, stock_actual, stock_minimo, unidad_stock)
+            SELECT 'PROPINA', 'Propina 10%', 0, 0, 0, 0, 0, 0, 'UND'
+            WHERE NOT EXISTS (SELECT 1 FROM productos WHERE codigo = 'PROPINA')
+        `);
+        await pool.query(`UPDATE productos SET controla_stock = 0, nombre = 'Propina 10%' WHERE codigo = 'PROPINA'`);
+
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS stock_movimientos (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 producto_id INT NOT NULL,

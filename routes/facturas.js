@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { exec } = require('child_process');
+const propina = require('../services/propina');
 
 // Validar rutas de retorno (evitar open-redirect / URLs externas)
 // Se usa para que el botón "Volver" de la impresión regrese a Mesas cuando aplique.
@@ -130,6 +131,11 @@ function buildFacturaTexto({ factura, cliente, detalles, pagos, negocio }) {
     out.push(`Cliente: ${cliente?.nombre || '-'}`);
     out.push(line);
     (detalles || []).forEach((d) => {
+        const esPropina = String(d?.producto_codigo || '') === 'PROPINA' || String(d?.producto_nombre || '') === 'Propina 10%';
+        if (esPropina) {
+            out.push(`Propina 10%  $${Number(d?.subtotal || 0).toLocaleString('es-CO')}`);
+            return;
+        }
         out.push(String(d?.producto_nombre || ''));
         out.push(`${Number(d?.cantidad || 0)}${String(d?.unidad_medida || '')}  $${Number(d?.precio_unitario || 0).toLocaleString('es-CO')}  $${Number(d?.subtotal || 0).toLocaleString('es-CO')}`);
     });
@@ -151,7 +157,7 @@ function buildFacturaTexto({ factura, cliente, detalles, pagos, negocio }) {
 
 // Crear nueva factura
 router.post('/', async (req, res) => {
-    const { cliente_id, total, forma_pago, productos, pagos } = req.body;
+    const { cliente_id, total, forma_pago, productos, pagos, acepta_propina } = req.body;
     
     console.log('Datos recibidos:', req.body);
     
@@ -160,7 +166,21 @@ router.post('/', async (req, res) => {
     }
 
     // Validaciones ANTES de abrir transacción (evita dejar conexiones abiertas si hay error)
-    const totalNum = Number(total || 0);
+    let lineas = Array.isArray(productos) ? productos : [];
+    let montoPropina = 0;
+    if (propina.aceptada(acepta_propina)) {
+        const [propinaRows] = await db.query(`SELECT id FROM productos WHERE codigo = 'PROPINA' LIMIT 1`);
+        if (!propinaRows.length) {
+            return res.status(400).json({ error: 'No está configurado el producto de propina' });
+        }
+        const propinaId = Number(propinaRows[0].id);
+        lineas = lineas.filter((p) => Number(p.producto_id) !== propinaId);
+        const base = propina.redondear(lineas.reduce((acc, p) => acc + Number(p.subtotal || 0), 0));
+        montoPropina = propina.calcular(base);
+    }
+    const totalNum = montoPropina > 0
+        ? propina.redondear(lineas.reduce((acc, p) => acc + Number(p.subtotal || 0), 0) + montoPropina)
+        : Number(total || 0);
     if (!Number.isFinite(totalNum) || totalNum <= 0) {
         return res.status(400).json({ error: 'Total inválido' });
     }
@@ -198,7 +218,7 @@ router.post('/', async (req, res) => {
             const factura_id = result.insertId;
 
             // Insertar detalles de factura
-            const detallesValues = productos.map(p => [
+            const detallesValues = lineas.map(p => [
                 factura_id,
                 p.producto_id,
                 p.cantidad,
@@ -206,6 +226,10 @@ router.post('/', async (req, res) => {
                 p.unidad,
                 p.subtotal
             ]);
+            if (montoPropina > 0) {
+                const propinaId = await propina.obtenerId(connection);
+                detallesValues.push([factura_id, propinaId, 1, montoPropina, 'UND', montoPropina]);
+            }
 
             await connection.query(
                 'INSERT INTO detalle_factura (factura_id, producto_id, cantidad, precio_unitario, unidad_medida, subtotal) VALUES ?',
@@ -298,7 +322,7 @@ router.get('/:id/imprimir', async (req, res) => {
 
         // Obtener detalles de la factura
         const [detalles] = await db.query(
-            `SELECT d.*, p.nombre as producto_nombre
+            `SELECT d.*, p.nombre as producto_nombre, p.codigo as producto_codigo
              FROM detalle_factura d
              JOIN productos p ON d.producto_id = p.id
              WHERE d.factura_id = ?`,
@@ -458,7 +482,7 @@ router.post('/:id/imprimir-servidor', async (req, res) => {
         const factura = facturas[0];
 
         const [detalles] = await db.query(
-            `SELECT d.*, p.nombre as producto_nombre
+            `SELECT d.*, p.nombre as producto_nombre, p.codigo as producto_codigo
              FROM detalle_factura d
              JOIN productos p ON d.producto_id = p.id
              WHERE d.factura_id = ?`,

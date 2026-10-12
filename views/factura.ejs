@@ -178,17 +178,20 @@
 
         <div class="productos-lista">
             <% detalles.forEach(function(item) { %>
+                <% const esPropina = String(item.producto_codigo || '') === 'PROPINA' || String(item.producto_nombre || '') === 'Propina 10%'; %>
                 <div class="producto-item">
                     <div class="producto-nombre">
-                        <%= item.producto_nombre %>
+                        <%= esPropina ? 'Propina 10%' : item.producto_nombre %>
                     </div>
                     <div class="producto-detalles">
+                        <% if (!esPropina) { %>
                         <div class="producto-cantidad">
                             <%= Number(item.cantidad).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) %><%= item.unidad_medida %>
                         </div>
                         <div class="producto-precio">
                             $<%= Number(item.precio_unitario).toLocaleString('es-CO') %>
                         </div>
+                        <% } %>
                         <div class="producto-total">
                             $<%= Number(item.subtotal).toLocaleString('es-CO') %>
                         </div>

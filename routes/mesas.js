@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const { exec } = require('child_process');
 const stock = require('../services/stock');
+const propina = require('../services/propina');
 
 function usuarioActualId(req) {
     const id = Number(req.session?.user?.id);
@@ -1126,7 +1127,7 @@ router.put('/items/:itemId/estado', async (req, res) => {
 // POST /mesas/pedidos/:pedidoId/facturar - API: genera factura desde pedido y cierra mesa
 router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
     const pedidoId = req.params.pedidoId;
-    const { cliente_id, forma_pago, pagos } = req.body || {};
+    const { cliente_id, forma_pago, pagos, acepta_propina } = req.body || {};
     if (!cliente_id) return res.status(400).json({ error: 'cliente_id requerido para facturar' });
     // forma_pago se mantiene por compatibilidad, pero lo recomendado es enviar pagos[] (pago mixto)
     try {
@@ -1146,7 +1147,9 @@ router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
             );
             if (items.length === 0) throw new Error('Pedido sin items');
 
-            const total = items.reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
+            const base = propina.redondear(items.reduce((acc, it) => acc + Number(it.subtotal || 0), 0));
+            const montoPropina = propina.aceptada(acepta_propina) ? propina.calcular(base) : 0;
+            const total = propina.redondear(base + montoPropina);
 
             // ===== Pago mixto: validar pagos[] si se envía =====
             // Relacionado con: public/js/mesas.js (modal de pagos)
@@ -1194,6 +1197,14 @@ router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
                 `INSERT INTO detalle_factura (factura_id, producto_id, cantidad, precio_unitario, unidad_medida, subtotal) VALUES ?`,
                 [detallesValues]
             );
+            if (montoPropina > 0) {
+                const propinaId = await propina.obtenerId(connection);
+                await connection.query(
+                    `INSERT INTO detalle_factura (factura_id, producto_id, cantidad, precio_unitario, unidad_medida, subtotal)
+                     VALUES (?, ?, 1, ?, 'UND', ?)`,
+                    [facturaId, propinaId, montoPropina, montoPropina]
+                );
+            }
 
             // Guardar pagos en factura_pagos (si existe la tabla)
             try {
@@ -1223,6 +1234,10 @@ router.post('/pedidos/:pedidoId/facturar', async (req, res) => {
             await connection.rollback();
             connection.release();
             console.error('Error en facturación desde pedido:', error);
+            const mensaje = String(error?.message || '');
+            if (mensaje.includes('no coincide') || mensaje.includes('propina') || mensaje.includes('sin items') || mensaje.includes('no encontrado')) {
+                return res.status(400).json({ error: mensaje });
+            }
             res.status(500).json({ error: 'Error al facturar pedido' });
         }
     } catch (error) {

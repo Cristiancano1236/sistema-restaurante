@@ -600,7 +600,7 @@ $(document).ready(function() {
     };
 
     // Generar factura
-    $('#generarFactura').click(function() {
+    $('#generarFactura').click(async function() {
         console.log('=== INICIO GENERACIÓN DE FACTURA ===');
         const cliente_id = $('#cliente_id').val();
         const forma_pago = $('#formaPago').val();
@@ -615,12 +615,29 @@ $(document).ready(function() {
             return;
         }
 
+        const montoPropina = Math.round(totalFactura * 10) / 100;
+        let aceptaPropina = false;
+        if (montoPropina > 0) {
+            const pregunta = await Swal.fire({
+                title: '¿El cliente acepta propina del 10%?',
+                text: `Se agregará $${montoPropina.toLocaleString('es-CO')} al total.`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Sí, agregar',
+                cancelButtonText: 'No, gracias'
+            });
+            if (pregunta.isConfirmed) aceptaPropina = true;
+            else if (pregunta.dismiss !== Swal.DismissReason.cancel) return;
+        }
+        const totalAPagar = aceptaPropina ? Math.round((totalFactura + montoPropina) * 100) / 100 : totalFactura;
+
         // Si eligieron pago mixto, pedimos el desglose antes de enviar
         // (para efectivo/transferencia/tarjeta simple, no mostramos modal y enviamos forma_pago como antes)
         const enviarFactura = (pagosSeleccionados) => {
             const factura = {
             cliente_id: cliente_id,
-            total: totalFactura,
+            total: totalAPagar,
+            acepta_propina: aceptaPropina,
             forma_pago: forma_pago,
             // pagos[] solo se envía si es mixto (o si el usuario lo definió)
             pagos: Array.isArray(pagosSeleccionados) ? pagosSeleccionados : undefined,
@@ -725,7 +742,7 @@ $(document).ready(function() {
         };
 
         if (forma_pago === 'mixto') {
-            pedirPagosMixtos(totalFactura).then(pagos => {
+            pedirPagosMixtos(totalAPagar).then(pagos => {
                 if (!pagos) return; // cancelado
                 pagosFactura = pagos;
                 enviarFactura(pagosFactura);

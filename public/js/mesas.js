@@ -932,16 +932,32 @@ $(function() {
         return acc + subtotal;
       }, 0);
 
+      const montoPropina = Math.round(totalPedido * 10) / 100;
+      let aceptaPropina = false;
+      if (montoPropina > 0) {
+        const pregunta = await runWithOffcanvasHidden(() => Swal.fire({
+          title: '¿El cliente acepta propina del 10%?',
+          text: `Se agregará $${montoPropina.toLocaleString('es-CO')} al total.`,
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: 'Sí, agregar',
+          cancelButtonText: 'No, gracias'
+        }));
+        if (pregunta.isConfirmed) aceptaPropina = true;
+        else if (pregunta.dismiss !== Swal.DismissReason.cancel) return;
+      }
+      const totalAPagar = aceptaPropina ? Math.round((totalPedido + montoPropina) * 100) / 100 : totalPedido;
+
       // Modal de pago mixto (permite 1 o varios medios)
       const pagos = await runWithOffcanvasHidden(async () => {
-        return await pedirPagosMixtos(totalPedido);
+        return await pedirPagosMixtos(totalAPagar);
       });
       if(!pagos) return;
 
       const resp = await fetch(`/api/mesas/pedidos/${pedidoActual.id}/facturar`, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ cliente_id, pagos })
+        body: JSON.stringify({ cliente_id, pagos, acepta_propina: aceptaPropina })
       });
       const data = await resp.json();
       if(!resp.ok) throw new Error(data.error||'Error al facturar');

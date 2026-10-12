@@ -320,3 +320,9 @@ CREATE TABLE IF NOT EXISTS stock_movimientos (
     FOREIGN KEY (pedido_item_id) REFERENCES pedido_items(id) ON DELETE SET NULL,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
 );
+
+-- 8) Ítem fijo de propina. No controla stock y no se envía a cocina.
+-- Relacionado con: db.js (ensureSchema), routes/mesas.js y routes/facturas.js
+INSERT INTO productos (codigo, nombre, precio_kg, precio_unidad, precio_libra, controla_stock, stock_actual, stock_minimo, unidad_stock)
+SELECT 'PROPINA', 'Propina 10%', 0, 0, 0, 0, 0, 0, 'UND'
+WHERE NOT EXISTS (SELECT 1 FROM productos WHERE codigo = 'PROPINA');
